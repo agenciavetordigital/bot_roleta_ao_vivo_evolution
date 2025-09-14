@@ -46,8 +46,11 @@ def configurar_driver():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
-    # A MUDANÇA ESTRATÉGICA 1: Adiciona um User-Agent de navegador real
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    
+    # A MUDANÇA ESTRATÉGICA: Adiciona opções para dificultar a detecção de automação
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
     
     chrome_options.binary_location = "/usr/bin/chromium"
     caminho_driver = "/usr/bin/chromedriver"
@@ -62,19 +65,14 @@ def buscar_ultimo_numero(driver):
     global ultimo_id_rodada
     try:
         driver.get(URL_ROLETA)
-        # A MUDANÇA ESTRATÉGICA 2: Aumenta o tempo de espera para o conteúdo carregar
-        wait = WebDriverWait(driver, 30) # Aumentado para 30 segundos
+        wait = WebDriverWait(driver, 30)
         
         # Espera pelo elemento que contém os resultados
         container_numeros = wait.until(
             EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'main-content')]//div[contains(@class, 'gap-2')]"))
         )
         
-        # Espera que o primeiro número dentro do container seja visível
-        primeiro_numero_div = wait.until(
-            EC.visibility_of(container_numeros.find_element(By.TAG_NAME, 'div'))
-        )
-
+        primeiro_numero_div = container_numeros.find_element(By.TAG_NAME, 'div')
         id_rodada_atual = primeiro_numero_div.get_attribute('innerHTML')
 
         if id_rodada_atual == ultimo_id_rodada:
@@ -87,6 +85,8 @@ def buscar_ultimo_numero(driver):
         return numero
     except Exception as e:
         logging.error(f"Erro ao buscar número com Selenium: {e}")
+        # Adicionado de volta para diagnóstico final
+        logging.error(f"HTML da página no momento do erro: {driver.page_source}")
         return None
 
 async def verificar_estrategias(bot, numero):
@@ -132,7 +132,7 @@ async def main():
         erro_tratado = str(e).replace("*", "").replace("_", "")
         logging.error(f"Um erro crítico ocorreu no loop principal: {erro_tratado}")
         if bot:
-            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: `{erro_tratado}`")
+            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: `{erro_tadotrad}`")
     finally:
         if driver:
             driver.quit()
