@@ -11,7 +11,7 @@ import os # Biblioteca para acessar variáveis de ambiente
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 # As configurações agora são lidas das variáveis de ambiente para segurança.
-# Você deve configurar TOKEN_BOT e CHAT_ID no painel da Render.
+# Você deve configurar TOKEN_BOT e CHAT_ID no painel da Railway.
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_ID = os.environ.get('CHAT_ID')
 
@@ -108,14 +108,14 @@ async def main():
     """Função principal que inicializa o bot e inicia o monitoramento."""
     # Validação para garantir que as variáveis de ambiente foram configuradas
     if not TOKEN_BOT or not CHAT_ID:
-        logging.critical("As variáveis de ambiente TOKEN_BOT e CHAT_ID não foram configuradas na Render.")
+        logging.critical("As variáveis de ambiente TOKEN_BOT e CHAT_ID não foram configuradas na Railway.")
         return
         
     try:
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' inicializado com sucesso!")
-        await enviar_alerta(bot, "✅ Bot monitor de roleta iniciado com sucesso! (Render)")
+        await enviar_alerta(bot, "✅ Bot monitor de roleta iniciado com sucesso! (Railway)")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Verifique seu token. Erro: {e}")
         return
@@ -124,7 +124,8 @@ async def main():
     while True:
         try:
             numero, _ = buscar_ultimo_numero()
-            if numero is not in [None, ""]:
+            # A linha abaixo foi corrigida
+            if numero not in [None, ""]:
                 await verificar_estrategias(bot, numero)
             
             await asyncio.sleep(INTERVALO_VERIFICACAO)
