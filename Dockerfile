@@ -4,14 +4,13 @@ FROM python:3.11-slim
 # Define o diretório de trabalho no container
 WORKDIR /app
 
-# Instala o wget e dependências do sistema para o Chrome, incluindo o comando 'which'
+# Instala dependências do sistema para o Chrome
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
-    which \
     --no-install-recommends
 
-# Baixa e instala a versão estável mais recente do Google Chrome
+# Baixa e instala a versão estável mais recente do Google Chrome e o Chromedriver
 RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
@@ -21,9 +20,6 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
     --no-install-recommends \
     && apt-get purge -y --auto-remove wget \
     && rm -rf /var/lib/apt/lists/*
-
-# A MUDANÇA ESTRATÉGICA: Encontra o caminho do executável do Chrome e o armazena em uma variável de ambiente
-ENV CHROME_BINARY_PATH=$(which google-chrome-stable)
 
 # Copia o arquivo de dependências
 COPY requirements.txt .
