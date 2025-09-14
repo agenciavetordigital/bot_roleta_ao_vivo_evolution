@@ -50,7 +50,10 @@ def obter_cookies_de_login():
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.binary_location = "/usr/bin/chromium-browser"
+        # --- CORREÇÃO FINAL ---
+        # O caminho correto para o navegador instalado via 'apt' no Debian
+        chrome_options.binary_location = "/usr/bin/chromium"
+        
         caminho_driver = "/usr/bin/chromedriver"
         service = ChromeService(executable_path=caminho_driver)
         driver = webdriver.Chrome(service=service, options=chrome_options)
