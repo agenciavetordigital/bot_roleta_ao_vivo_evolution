@@ -17,9 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get purge -y --auto-remove wget gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# A MUDANÇA ESTRATÉGICA: Encontra o caminho do executável do Chrome e o armazena em uma variável de ambiente
-ENV CHROME_BINARY_PATH=$(which google-chrome-stable)
-
 # Define o diretório de trabalho
 WORKDIR /app
 
