@@ -47,8 +47,6 @@ def configurar_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    # A MUDANÇA FINAL: Fornecemos o caminho exato onde o apt instala o chromedriver.
-    # Isso elimina qualquer ambiguidade do sistema.
     caminho_driver = "/usr/bin/chromedriver"
     service = ChromeService(executable_path=caminho_driver) 
     
@@ -120,16 +118,17 @@ async def main():
                 await verificar_estrategias(bot, numero)
             await asyncio.sleep(INTERVALO_VERIFICACAO)
     except Exception as e:
-        logging.error(f"Um erro crítico ocorreu no loop principal: {e}")
+        # Tratamento do erro de formatação do Telegram
+        erro_tratado = str(e).replace("*", "").replace("_", "")
+        logging.error(f"Um erro crítico ocorreu no loop principal: {erro_tratado}")
         if bot:
-            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: {e}")
+            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: `{erro_tratado}`")
     finally:
         if driver:
             driver.quit()
         logging.info("Processo principal finalizado.")
 
 if __name__ == '__main__':
-    # Loop para tentar reiniciar o bot em caso de falha crítica
     while True:
         try:
             asyncio.run(main())
