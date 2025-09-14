@@ -47,8 +47,8 @@ def configurar_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    # CORREÇÃO FINAL: Apontamos para o outro caminho padrão de instalação do Chrome no Linux.
-    chrome_options.binary_location = "/opt/google/chrome/google-chrome"
+    # A MUDANÇA FINAL: Especificamos o caminho para o NAVEGADOR.
+    chrome_options.binary_location = "/usr/bin/google-chrome"
     
     caminho_driver = "/usr/bin/chromedriver"
     service = ChromeService(executable_path=caminho_driver) 
