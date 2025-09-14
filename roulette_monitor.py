@@ -38,7 +38,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 ultimo_id_rodada = None
 
 def configurar_driver():
-    """Configura o driver e o navegador Chrome, usando o caminho do binário a partir de uma variável de ambiente."""
+    """Configura o driver e o navegador Chrome com caminhos explícitos."""
     logging.info("Configurando o driver e o navegador Chrome...")
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--headless")
@@ -47,14 +47,8 @@ def configurar_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    # A MUDANÇA ESTRATÉGICA: Lemos o caminho do binário do Chrome a partir da variável de ambiente definida no Dockerfile.
-    chrome_path = os.environ.get('CHROME_BINARY_PATH')
-    if chrome_path:
-        logging.info(f"Usando o caminho do Chrome encontrado em: {chrome_path}")
-        chrome_options.binary_location = chrome_path
-    else:
-        logging.warning("Variável de ambiente CHROME_BINARY_PATH não encontrada. O Selenium tentará encontrar o Chrome automaticamente.")
-        # Se a variável não for encontrada, o erro 'cannot find chrome binary' acontecerá aqui
+    # A MUDANÇA FINAL: Apontamos para o caminho exato do binário instalado pelo Dockerfile.
+    chrome_options.binary_location = "/usr/bin/google-chrome-stable"
         
     caminho_driver = "/usr/bin/chromedriver"
     service = ChromeService(executable_path=caminho_driver) 
