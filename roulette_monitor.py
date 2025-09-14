@@ -18,8 +18,11 @@ CHAT_ID = os.environ.get('CHAT_ID')
 TIPMANAGER_USER = os.environ.get('TIPMANAGER_USER')
 TIPMANAGER_PASS = os.environ.get('TIPMANAGER_PASS')
 
-if not all([TOKEN_BOT, CHAT_ID, TIPMANAGER_USER, TIPMANAGER_PASS]):
-    logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, TIPMANAGER_USER, TIPMANAGER_PASS) devem ser definidas!")
+# A MUDANÇA ESTRATÉGICA: Lê o caminho do Chrome a partir da variável de ambiente definida no Dockerfile
+CHROME_PATH = os.environ.get('CHROME_BINARY_PATH')
+
+if not all([TOKEN_BOT, CHAT_ID, TIPMANAGER_USER, TIPMANAGER_PASS, CHROME_PATH]):
+    logging.critical("Todas as variáveis de ambiente devem ser definidas (incluindo CHROME_BINARY_PATH)!")
     exit()
 
 URL_ROLETA = 'https://app.tipmanager.net/casino-bot/roulette/last-results'
@@ -47,12 +50,11 @@ def configurar_driver():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     
-    # Caminhos dos executáveis instalados pelo Dockerfile
-    caminho_driver = "/usr/bin/chromedriver"
-    caminho_navegador = "/usr/bin/chromium"
+    # Usa o caminho do navegador encontrado pelo Dockerfile
+    chrome_options.binary_location = CHROME_PATH
     
-    chrome_options.binary_location = caminho_navegador
-    service = ChromeService(executable_path=caminho_driver)
+    # Deixa o Selenium gerenciar o chromedriver
+    service = ChromeService()
     driver = webdriver.Chrome(service=service, options=chrome_options)
     logging.info("Driver do Chrome configurado com sucesso.")
     return driver
@@ -73,7 +75,6 @@ def fazer_login(driver):
         login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         login_button.click()
         
-        # Espera por um elemento da página principal para confirmar o login
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "nav[aria-label='Main']")))
         logging.info("Login realizado com sucesso!")
         return True
@@ -88,17 +89,12 @@ async def buscar_ultimo_numero(driver):
         driver.get(URL_ROLETA)
         wait = WebDriverWait(driver, 30)
         
-        # Seletor robusto para o container principal
         history_container = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div[class*='LastResults_container']"))
         )
         
-        # Pega o primeiro 'div' que é filho direto, que representa o número mais recente
         primeiro_numero_div = history_container.find_element(By.XPATH, "./div[1]")
-        
-        # Dentro desse 'div', pega o 'span' que contém o número
         numero_span = primeiro_numero_div.find_element(By.TAG_NAME, 'span')
-        
         numero_str = numero_span.text.strip()
         
         if numero_str == ultimo_numero_encontrado:
@@ -116,10 +112,6 @@ async def buscar_ultimo_numero(driver):
 
     except Exception as e:
         logging.error(f"Erro ao buscar número com Selenium: {e}")
-        try:
-            logging.error(f"HTML da página no momento do erro: {driver.page_source[:2000]}")
-        except:
-             logging.error("Não foi possível obter o HTML da página para depuração.")
         return None
 
 async def verificar_estrategias(bot, numero):
