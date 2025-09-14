@@ -48,6 +48,8 @@ def buscar_ultimo_numero():
         container_numeros = soup.find('div', class_='flex flex-wrap gap-2 justify-center')
         if not container_numeros:
             logging.warning("Não foi possível encontrar o container de números no site.")
+            # Linha de diagnóstico adicionada para vermos o que o site está retornando
+            logging.warning(f"Início do HTML recebido: {response.text[:500]}")
             return None, None
 
         primeiro_numero_div = container_numeros.find('div')
@@ -115,7 +117,7 @@ async def main():
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' inicializado com sucesso!")
-        await enviar_alerta(bot, "✅ Bot monitor de roleta iniciado com sucesso! (Railway)")
+        await enviar_alerta(bot, "✅ Bot monitor de roleta iniciado com sucesso! (Railway - Diagnóstico)")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Verifique seu token. Erro: {e}")
         return
@@ -124,7 +126,6 @@ async def main():
     while True:
         try:
             numero, _ = buscar_ultimo_numero()
-            # A linha abaixo foi corrigida
             if numero not in [None, ""]:
                 await verificar_estrategias(bot, numero)
             
