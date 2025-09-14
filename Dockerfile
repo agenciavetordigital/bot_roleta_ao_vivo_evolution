@@ -1,18 +1,22 @@
-# Usa uma imagem base do Python, super leve
-FROM python:3.11-slim
+# Usa uma imagem base do Debian com Python
+FROM python:3.11-slim-bookworm
 
-# Define o diretório de trabalho dentro do container
+# Instala dependências do sistema necessárias para o Chromium rodar
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    chromium-driver \
+    && rm -rf /var/lib/apt/lists/*
+
+# Define o diretório de trabalho
 WORKDIR /app
 
-# Copia o arquivo de dependências
+# Copia e instala as dependências do Python
 COPY requirements.txt .
-
-# Instala as dependências
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia o script do bot
 COPY roulette_monitor.py .
 
-# Define o comando para rodar o bot quando o container iniciar
+# Define o comando para rodar o bot
 CMD ["python", "roulette_monitor.py"]
 
