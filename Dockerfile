@@ -1,69 +1,39 @@
-# Usamos uma imagem base oficial do Python com o sistema Debian (Bookworm)
-FROM python:3.11-slim-bookworm
+# Usa uma imagem base oficial do Python
+FROM python:3.11-slim
 
-# Definimos o diretório de trabalho dentro do container
+# Define o diretório de trabalho no container
 WORKDIR /app
 
-# Atualizamos a lista de pacotes e instalamos as dependências do sistema
-# wget e unzip são necessários para baixar o Chrome e o chromedriver
+# Instala o wget e dependências do sistema para o Chrome, incluindo o comando 'which'
 RUN apt-get update && apt-get install -y \
     wget \
-    unzip \
-    # Dependências essenciais para o Chrome rodar em modo headless
-    libglib2.0-0 \
-    libnss3 \
-    libgconf-2-4 \
-    libfontconfig1 \
-    libx11-6 \
-    libx11-xcb1 \
-    libxcb1 \
-    libxcomposite1 \
-    libxcursor1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxi6 \
-    libxrandr2 \
-    libxrender1 \
-    libxss1 \
-    libxtst6 \
-    ca-certificates \
-    fonts-liberation \
-    libappindicator3-1 \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcairo2 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libpango-1.0-0 \
-    libnspr4 \
+    gnupg \
+    which \
+    --no-install-recommends
+
+# Baixa e instala a versão estável mais recente do Google Chrome
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y \
+    google-chrome-stable \
+    chromedriver \
     --no-install-recommends \
+    && apt-get purge -y --auto-remove wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Baixamos e instalamos o Google Chrome
-RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-    && dpkg -i google-chrome-stable_current_amd64.deb \
-    || apt-get -fy install \
-    && rm google-chrome-stable_current_amd64.deb
+# A MUDANÇA ESTRATÉGICA: Encontra o caminho do executável do Chrome e o armazena em uma variável de ambiente
+ENV CHROME_BINARY_PATH=$(which google-chrome-stable)
 
-# Baixamos e instalamos o Chromedriver
-RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/125.0.6422.78/linux64/chromedriver-linux64.zip \
-    && unzip chromedriver-linux64.zip \
-    && mv chromedriver-linux64/chromedriver /usr/bin/chromedriver \
-    && rm chromedriver-linux64.zip \
-    && rm -rf chromedriver-linux64
-
-# Copiamos o arquivo de dependências do Python e as instalamos
+# Copia o arquivo de dependências
 COPY requirements.txt .
+
+# Instala as dependências do Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiamos o script do bot
+# Copia o código da aplicação
 COPY roulette_monitor.py .
 
-# Comando para iniciar o bot quando o container rodar
+# Define o comando para rodar a aplicação
 CMD ["python", "roulette_monitor.py"]
+
