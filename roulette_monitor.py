@@ -18,11 +18,8 @@ CHAT_ID = os.environ.get('CHAT_ID')
 TIPMANAGER_USER = os.environ.get('TIPMANAGER_USER')
 TIPMANAGER_PASS = os.environ.get('TIPMANAGER_PASS')
 
-# A MUDANÇA ESTRATÉGICA: Lê o caminho do Chrome a partir da variável de ambiente definida no Dockerfile
-CHROME_PATH = os.environ.get('CHROME_BINARY_PATH')
-
-if not all([TOKEN_BOT, CHAT_ID, TIPMANAGER_USER, TIPMANAGER_PASS, CHROME_PATH]):
-    logging.critical("Todas as variáveis de ambiente devem ser definidas (incluindo CHROME_BINARY_PATH)!")
+if not all([TOKEN_BOT, CHAT_ID, TIPMANAGER_USER, TIPMANAGER_PASS]):
+    logging.critical("As variáveis de ambiente TOKEN_BOT, CHAT_ID, TIPMANAGER_USER e TIPMANAGER_PASS devem ser definidas!")
     exit()
 
 URL_ROLETA = 'https://app.tipmanager.net/casino-bot/roulette/last-results'
@@ -50,8 +47,8 @@ def configurar_driver():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     
-    # Usa o caminho do navegador encontrado pelo Dockerfile
-    chrome_options.binary_location = CHROME_PATH
+    # Define o caminho para o executável do Chrome instalado pelo Dockerfile
+    chrome_options.binary_location = "/usr/bin/google-chrome-stable"
     
     # Deixa o Selenium gerenciar o chromedriver
     service = ChromeService()
