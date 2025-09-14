@@ -1,5 +1,4 @@
 requests
 beautifulsoup4
 python-telegram-bot
-selenium==4.11.2
-webdriver-manager==4.0.1
+selenium
