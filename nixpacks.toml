@@ -1,8 +1,10 @@
-
+Arquivo de configuração para o Nixpacks (sistema de build da Railway)
 [phases.setup]
 
-
+Instala o navegador Google Chrome e todas as dependências do sistema
+necessárias para ele rodar em um ambiente Linux sem interface gráfica.
 nixPkgs = [
+"pkgs.google-chrome", # Instala o próprio navegador
 "pkgs.stdenv.cc.cc.lib",
 "pkgs.glib",
 "pkgs.nss",
@@ -26,3 +28,8 @@ nixPkgs = [
 "pkgs.at-spi2-atk",
 "pkgs.pangox-compat"
 ]
+
+[start]
+
+Define o comando para iniciar a aplicação
+command = "python roulette_monitor.py"
