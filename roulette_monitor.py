@@ -79,6 +79,8 @@ def buscar_ultimo_numero(driver):
         return numero
     except Exception as e:
         logging.error(f"Erro ao buscar número com Selenium: {e}")
+        # A MUDANÇA ESTRATÉGICA: Imprime o HTML da página no log para diagnóstico
+        logging.error(f"HTML da página no momento do erro: {driver.page_source}")
         return None
 
 async def verificar_estrategias(bot, numero):
