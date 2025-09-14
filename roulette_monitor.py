@@ -46,10 +46,10 @@ def configurar_driver():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
+    # A MUDANÇA ESTRATÉGICA 1: Adiciona um User-Agent de navegador real
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     
-    # O pacote chromium instala o binário neste caminho padrão
     chrome_options.binary_location = "/usr/bin/chromium"
-        
     caminho_driver = "/usr/bin/chromedriver"
     service = ChromeService(executable_path=caminho_driver) 
     
@@ -62,11 +62,19 @@ def buscar_ultimo_numero(driver):
     global ultimo_id_rodada
     try:
         driver.get(URL_ROLETA)
-        wait = WebDriverWait(driver, 20)
+        # A MUDANÇA ESTRATÉGICA 2: Aumenta o tempo de espera para o conteúdo carregar
+        wait = WebDriverWait(driver, 30) # Aumentado para 30 segundos
+        
+        # Espera pelo elemento que contém os resultados
         container_numeros = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div.flex.flex-wrap.gap-2.justify-center"))
+            EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'main-content')]//div[contains(@class, 'gap-2')]"))
         )
-        primeiro_numero_div = container_numeros.find_element(By.TAG_NAME, 'div')
+        
+        # Espera que o primeiro número dentro do container seja visível
+        primeiro_numero_div = wait.until(
+            EC.visibility_of(container_numeros.find_element(By.TAG_NAME, 'div'))
+        )
+
         id_rodada_atual = primeiro_numero_div.get_attribute('innerHTML')
 
         if id_rodada_atual == ultimo_id_rodada:
@@ -79,8 +87,6 @@ def buscar_ultimo_numero(driver):
         return numero
     except Exception as e:
         logging.error(f"Erro ao buscar número com Selenium: {e}")
-        # A MUDANÇA ESTRATÉGICA: Imprime o HTML da página no log para diagnóstico
-        logging.error(f"HTML da página no momento do erro: {driver.page_source}")
         return None
 
 async def verificar_estrategias(bot, numero):
