@@ -1,19 +1,30 @@
 # -*- coding: utf-8 -*-
-import requests
-from bs4 import BeautifulSoup
+
+import os
 import time
-import telegram
 import logging
 import asyncio
+import telegram
+from telegram.constants import ParseMode
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
-TOKEN_BOT = "8453600984:AAFn7thSXwu4BHLwleZnnrNp_qN3FoDftV4"
-CHAT_ID = 1354332413
+TOKEN_BOT = os.environ.get('TOKEN_BOT')
+CHAT_ID = os.environ.get('CHAT_ID')
+# NOVAS VARIÁVEIS PARA O LOGIN
+TIPMINER_USER = os.environ.get('TIPMINER_USER')
+TIPMINER_PASS = os.environ.get('TIPMINER_PASS')
+
+if not all([TOKEN_BOT, CHAT_ID, TIPMINER_USER, TIPMINER_PASS]):
+    logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, TIPMINER_USER, TIPMINER_PASS) devem ser definidas!")
+    exit()
+
 URL_ROLETA = 'https://www.tipminer.com/br/historico/evolution/roleta-ao-vivo'
+URL_LOGIN = 'https://www.tipminer.com/br/login'
 INTERVALO_VERIFICACAO = 15
 
 # --- ESTRATÉGIAS DE ALERTA ---
@@ -25,113 +36,170 @@ ESTRATEGIAS = {
     "Estratégia Coluna 1": lambda num: num % 3 == 1 and num != 0,
 }
 
-# --- LOGGING ---
+# --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ultimo_id_rodada = None
 
-# --- FUNÇÃO PARA BUSCAR O NÚMERO ---
+def configurar_driver():
+    """Configura o driver e o navegador Chrome."""
+    logging.info("Configurando o driver e o navegador Chrome...")
+    chrome_options = webdriver.ChromeOptions()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920x1080")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    
+    chrome_options.binary_location = "/usr/bin/chromium"
+    caminho_driver = "/usr/bin/chromedriver"
+    service = ChromeService(executable_path=caminho_driver) 
+    
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    logging.info("Driver e navegador Chrome configurados com sucesso.")
+    return driver
+
+def fazer_login(driver):
+    """Navega para a página de login e efetua o login do usuário."""
+    try:
+        logging.info("Iniciando processo de login no Tipminer...")
+        driver.get(URL_LOGIN)
+        wait = WebDriverWait(driver, 20)
+
+        email_input = wait.until(EC.presence_of_element_located((By.NAME, "email")))
+        email_input.send_keys(TIPMINER_USER)
+        logging.info("E-mail preenchido.")
+
+        password_input = driver.find_element(By.NAME, "password")
+        password_input.send_keys(TIPMINER_PASS)
+        logging.info("Senha preenchida.")
+
+        login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+        login_button.click()
+        logging.info("Botão de login clicado.")
+        
+        wait.until(EC.url_changes(URL_LOGIN))
+        logging.info("Redirecionamento após login detectado.")
+        
+        logging.info("Navegando para a página da roleta para garantir...")
+        driver.get(URL_ROLETA)
+
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-history-content='true']")))
+        logging.info("Login realizado com sucesso! Conteúdo da página de roleta carregado.")
+        return True
+
+    except Exception as e:
+        logging.error(f"Falha no processo de login: {e}")
+        try:
+            current_url = driver.current_url
+            page_source = driver.page_source
+            logging.error(f"URL atual no momento da falha: {current_url}")
+            logging.error(f"HTML da página no momento da falha (primeiros 1000 caracteres): {page_source[:1000]}")
+        except Exception as debug_e:
+            logging.error(f"Erro adicional ao tentar obter informações de depuração: {debug_e}")
+        return False
+
 def buscar_ultimo_numero(driver):
+    """Busca o número mais recente da roleta usando Selenium."""
     global ultimo_id_rodada
     try:
         wait = WebDriverWait(driver, 30)
+        
         history_container = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-history-content='true']"))
         )
+        
+        container_numeros = history_container.find_element(By.CSS_SELECTOR, "div.gap-2")
 
-        spans = history_container.find_elements(By.TAG_NAME, 'span')
+        # Pega apenas spans que correspondem ao estilo dos números
+        spans_numeros = container_numeros.find_elements(
+            By.CSS_SELECTOR, "span.flex.justify-center.items-center"
+        )
 
-        # Loga todos os spans capturados
-        logging.info("Capturados os seguintes spans no histórico:")
-        for span in spans:
-            logging.info(f"→ '{span.text.strip()}'")
-
-        for span in spans:
+        for span in spans_numeros:
             texto = span.text.strip()
+            logging.info(f"Span candidato -> '{texto}'")
 
-            # Filtro reforçado: só aceita dígitos, até 2 caracteres
-            if not texto.isdigit() or len(texto) > 2:
-                continue
-
-            numero = int(texto)
-
-            # Garante que é número válido da roleta (0–36)
-            if 0 <= numero <= 36:
-                if texto == ultimo_id_rodada:
+            if texto.isdigit() and 0 <= int(texto) <= 36:
+                id_rodada_atual = texto
+                if id_rodada_atual == ultimo_id_rodada:
                     return None
-                ultimo_id_rodada = texto
-                logging.info(f"Número mais recente encontrado: {numero}")
+
+                ultimo_id_rodada = id_rodada_atual
+                numero = int(texto)
+                logging.info(f"Número válido encontrado: {numero}")
                 return numero
 
-        logging.warning("Nenhum número válido de roleta encontrado no histórico.")
+        logging.warning("Nenhum número válido encontrado nos spans capturados.")
         return None
 
     except Exception as e:
         logging.error(f"Erro ao buscar número com Selenium: {e}")
         return None
 
-# --- FUNÇÕES DO BOT ---
 async def verificar_estrategias(bot, numero):
+    """Verifica o número contra a lista de estratégias e envia alertas."""
     if numero is None:
         return
     for nome_estrategia, condicao in ESTRATEGIAS.items():
-        try:
-            if condicao(numero):
-                mensagem = (
-                    f"🎯 Gatilho Encontrado! 🎯\n\n"
-                    f"Estratégia: *{nome_estrategia}*\n"
-                    f"Número Sorteado: *{numero}*"
-                )
-                logging.info(f"Estratégia '{nome_estrategia}' ativada → enviando alerta")
-                await enviar_alerta(bot, mensagem)
-        except Exception as e:
-            logging.error(f"Erro na estratégia '{nome_estrategia}': {e}")
+        if condicao(numero):
+            mensagem = f"🎯 Gatilho Encontrado! 🎯\n\nEstratégia: *{nome_estrategia}*\nNúmero Sorteado: *{numero}*"
+            logging.info(f"Condição da estratégia '{nome_estrategia}' atendida. Enviando alerta...")
+            await enviar_alerta(bot, mensagem)
 
 async def enviar_alerta(bot, mensagem):
+    """Envia uma mensagem para o chat configurado no Telegram."""
     try:
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=mensagem,
-            parse_mode=telegram.ParseMode.MARKDOWN
-        )
-        logging.info("✅ Alerta enviado com sucesso!")
+        await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
+        logging.info("Alerta enviado com sucesso!")
     except Exception as e:
-        logging.error(f"Erro ao enviar alerta: {e}")
+        logging.error(f"Erro ao enviar mensagem para o Telegram: {e}")
 
-# --- LOOP PRINCIPAL ---
 async def main():
+    """Função principal que inicializa o bot e inicia o monitoramento."""
+    bot = None
     try:
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' inicializado com sucesso!")
-        await enviar_alerta(bot, "✅ Bot monitor de roleta iniciado com sucesso!")
+        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' conectado e tentando fazer login...")
     except Exception as e:
-        logging.critical(f"Erro ao conectar com Telegram: {e}")
+        logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
 
-    logging.info("Iniciando monitoramento da roleta...")
+    driver = None
+    try:
+        driver = configurar_driver()
+        
+        if not fazer_login(driver):
+            await enviar_alerta(bot, "❌ Falha no login do Tipminer. Verifique as credenciais e reinicie o bot.")
+            raise Exception("O login no Tipminer falhou.")
 
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    driver = webdriver.Chrome(options=options)
-
-    driver.get(URL_ROLETA)
-
-    while True:
-        try:
+        await enviar_alerta(bot, "🔒 Login no Tipminer realizado com sucesso! Iniciando monitoramento.")
+        
+        while True:
             numero = buscar_ultimo_numero(driver)
             if numero is not None:
                 await verificar_estrategias(bot, numero)
             await asyncio.sleep(INTERVALO_VERIFICACAO)
-        except KeyboardInterrupt:
-            logging.info("Monitoramento interrompido pelo usuário.")
-            await enviar_alerta(bot, "❌ Bot monitor encerrado manualmente.")
-            break
-        except Exception as e:
-            logging.error(f"Erro crítico no loop principal: {e}")
-            logging.info("⏳ Aguardando 60 segundos antes de tentar novamente...")
-            await asyncio.sleep(60)
+    except Exception as e:
+        erro_tratado = str(e).replace("*", "").replace("_", "")
+        logging.error(f"Um erro crítico ocorreu no loop principal: {erro_tratado}")
+        if bot:
+            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: `{erro_tratado}`")
+    finally:
+        if driver:
+            driver.quit()
+        logging.info("Processo principal finalizado.")
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    while True:
+        try:
+            asyncio.run(main())
+            logging.info("O programa principal foi encerrado. Reiniciando em 1 minuto.")
+        except Exception as e:
+            logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
+        time.sleep(60)
