@@ -19,7 +19,7 @@ CHAT_ID = os.environ.get('CHAT_ID')
 TIPMINER_USER = os.environ.get('TIPMINER_USER')
 TIPMINER_PASS = os.environ.get('TIPMINER_PASS')
 
-API_URL = "https://www.tipminer.com/api/v3/history/roulette/0194b473-1738-70dd-84a9-f1ddd4f00678?limit=200&subject=filter&timezone=America%2FSao_Paulo"
+API_URL = "https://www.tipminer.com/api/v3/history/roulette/0194b473-1788-70dd-84a9-f1ddd4f00678?limit=200&subject=filter&timezone=America%2FSao_Paulo"
 URL_LOGIN = 'https://www.tipminer.com/br/login'
 
 if not all([TOKEN_BOT, CHAT_ID, TIPMINER_USER, TIPMINER_PASS]):
@@ -50,9 +50,9 @@ def obter_cookies_de_login():
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        # --- CORREÇÃO FINAL ---
-        # O caminho correto para o navegador instalado via 'apt' no Debian
-        chrome_options.binary_location = "/usr/bin/chromium"
+        
+        # REMOVIDO: Deixar o Selenium encontrar o navegador automaticamente
+        # chrome_options.binary_location = "/usr/bin/chromium" 
         
         caminho_driver = "/usr/bin/chromedriver"
         service = ChromeService(executable_path=caminho_driver)
@@ -74,7 +74,6 @@ def obter_cookies_de_login():
         wait.until(EC.url_changes(URL_LOGIN))
         logging.info("Login realizado com sucesso! Capturando cookies...")
         
-        # Converte os cookies do Selenium para um formato que o httpx entende
         cookies_selenium = driver.get_cookies()
         cookies_httpx = {cookie['name']: cookie['value'] for cookie in cookies_selenium}
         
@@ -172,4 +171,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
