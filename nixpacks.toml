@@ -1,10 +1,11 @@
 Arquivo de configuração para o Nixpacks (sistema de build da Railway)
 [phases.setup]
 
-Instala o navegador Google Chrome e todas as dependências do sistema
-necessárias para ele rodar em um ambiente Linux sem interface gráfica.
+Instala o navegador Chromium (versão de código aberto do Chrome),
+o Chromedriver (essencial para o Selenium) e todas as dependências do sistema.
 nixPkgs = [
-"pkgs.google-chrome", # Instala o próprio navegador
+"pkgs.chromium",
+"pkgs.chromedriver", # Adiciona o Chromedriver explicitamente
 "pkgs.stdenv.cc.cc.lib",
 "pkgs.glib",
 "pkgs.nss",
