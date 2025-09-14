@@ -1,5 +1,7 @@
 requests
 beautifulsoup4
 python-telegram-bot
-selenium
-webdriver-manager
+
+Fixando as versões para garantir estabilidade no ambiente da Railway
+selenium==4.11.2
+webdriver-manager==4.0.1
