@@ -11,6 +11,8 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+# A MUDANÇA ESTRATÉGICA: Importa o gerenciador de drivers
+from webdriver_manager.chrome import ChromeDriverManager
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
@@ -46,12 +48,13 @@ def configurar_driver():
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920x1080")
     
-    # Define o caminho para o executável do Chrome instalado pelo Dockerfile
-    chrome_options.binary_location = "/usr/bin/google-chrome-stable"
+    # A MUDANÇA ESTRATÉGICA: O webdriver-manager encontra o Chrome e baixa o driver compatível.
+    # Não precisamos mais especificar o caminho do binário.
+    service = ChromeService(ChromeDriverManager().install())
     
-    # Deixa o Selenium gerenciar o chromedriver
-    service = ChromeService()
     driver = webdriver.Chrome(service=service, options=chrome_options)
     logging.info("Driver do Chrome configurado com sucesso.")
     return driver
@@ -72,6 +75,7 @@ def fazer_login(driver):
         login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         login_button.click()
         
+        # Espera por um elemento que só aparece após o login bem-sucedido
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "nav[aria-label='Main']")))
         logging.info("Login realizado com sucesso!")
         return True
@@ -86,11 +90,15 @@ async def buscar_ultimo_numero(driver):
         driver.get(URL_ROLETA)
         wait = WebDriverWait(driver, 30)
         
+        # Seletor CSS mais específico para o container dos resultados
         history_container = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div[class*='LastResults_container']"))
         )
         
+        # Encontra o primeiro div dentro do container, que é o número mais recente
         primeiro_numero_div = history_container.find_element(By.XPATH, "./div[1]")
+        
+        # Pega o texto do span dentro deste div
         numero_span = primeiro_numero_div.find_element(By.TAG_NAME, 'span')
         numero_str = numero_span.text.strip()
         
