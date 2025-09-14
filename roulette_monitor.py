@@ -71,35 +71,47 @@ def fazer_login(driver):
         driver.get(URL_LOGIN)
         wait = WebDriverWait(driver, 20)
 
-        # Encontra e preenche o campo de e-mail
         email_input = wait.until(EC.presence_of_element_located((By.NAME, "email")))
         email_input.send_keys(TIPMINER_USER)
         logging.info("E-mail preenchido.")
 
-        # Encontra e preenche o campo de senha
         password_input = driver.find_element(By.NAME, "password")
         password_input.send_keys(TIPMINER_PASS)
         logging.info("Senha preenchida.")
 
-        # Encontra e clica no botão de login
         login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         login_button.click()
         logging.info("Botão de login clicado.")
+        
+        # MUDANÇA ESTRATÉGICA: Espera a URL mudar, indicando que saímos da página de login
+        wait.until(EC.url_changes(URL_LOGIN))
+        logging.info("Redirecionamento após login detectado.")
+        
+        # Garante que estamos na página correta
+        logging.info("Navegando para a página da roleta para garantir...")
+        driver.get(URL_ROLETA)
 
-        # Espera o login ser bem-sucedido, aguardando um elemento da página de roleta
+        # Agora sim, espera o conteúdo carregar
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-history-content='true']")))
         logging.info("Login realizado com sucesso! Conteúdo da página de roleta carregado.")
         return True
 
     except Exception as e:
         logging.error(f"Falha no processo de login: {e}")
+        try:
+            # Tenta capturar informações de depuração
+            current_url = driver.current_url
+            page_source = driver.page_source
+            logging.error(f"URL atual no momento da falha: {current_url}")
+            logging.error(f"HTML da página no momento da falha (primeiros 1000 caracteres): {page_source[:1000]}")
+        except Exception as debug_e:
+            logging.error(f"Erro adicional ao tentar obter informações de depuração: {debug_e}")
         return False
 
 def buscar_ultimo_numero(driver):
     """Busca o número mais recente da roleta usando Selenium."""
     global ultimo_id_rodada
     try:
-        # Não precisamos mais navegar para a URL aqui, pois o login já nos redireciona
         wait = WebDriverWait(driver, 30)
         
         history_container = wait.until(
@@ -163,7 +175,6 @@ async def main():
     try:
         driver = configurar_driver()
         
-        # Tenta fazer o login
         if not fazer_login(driver):
             await enviar_alerta(bot, "❌ Falha no login do Tipminer. Verifique as credenciais e reinicie o bot.")
             raise Exception("O login no Tipminer falhou.")
