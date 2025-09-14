@@ -7,16 +7,13 @@ import asyncio
 import telegram
 import httpx  # Biblioteca moderna para chamadas de API
 from telegram.constants import ParseMode
-from datetime import datetime
-import pytz  # Para fuso horário
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_ID = os.environ.get('CHAT_ID')
 
-# O ID da roleta, extraído da URL que você encontrou
-ROULETTE_ID = "0194b473-1738-70dd-84a9-f1ddd4f00678"
-BASE_API_URL = f"https://www.tipminer.com/api/v3/types-per-hour/roulette/{ROULETTE_ID}/"
+# A URL da API que você encontrou!
+API_URL = "https://www.tipminer.com/api/v3/history/roulette/0194b473-1738-70dd-84a9-f1ddd4f00678?limit=200&subject=filter&timezone=America%2FSao_Paulo"
 
 if not all([TOKEN_BOT, CHAT_ID]):
     logging.critical("As variáveis de ambiente (TOKEN_BOT, CHAT_ID) devem ser definidas!")
@@ -42,62 +39,45 @@ async def buscar_ultimo_numero(client):
     """Busca o número mais recente da roleta na API."""
     global ultimo_id_rodada
     try:
-        # Gera a data atual no fuso horário de São Paulo
-        tz = pytz.timezone('America/Sao_Paulo')
-        now = datetime.now(tz)
-        data_hoje = now.strftime('%Y-%m-%d')
-
-        # Constrói a URL da API dinamicamente
-        api_url_dinamica = f"{BASE_API_URL}{data_hoje}?timezone=America/Sao_Paulo"
-
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Accept': 'application/json',
+            'Referer': 'https://www.tipminer.com/br/historico/evolution/roleta-ao-vivo' # Adicionado para simular um acesso legítimo
         }
-        response = await client.get(api_url_dinamica, headers=headers, timeout=10)
+        response = await client.get(API_URL, headers=headers, timeout=15)
         response.raise_for_status()
 
         data = response.json()
 
-        # Encontra a rodada mais recente nos dados retornados pela API
-        ultima_rodada = None
-        # Itera das horas mais recentes para as mais antigas para encontrar a última jogada
-        for hora in range(now.hour, -1, -1):
-            hora_str = f"{hora:02d}"  # Formata a hora como "01", "02", etc.
-            rodadas_na_hora = data.get(hora_str)
-
-            if rodadas_na_hora and isinstance(rodadas_na_hora, list) and len(rodadas_na_hora) > 0:
-                # Pega a última rodada da lista (a mais recente desta hora)
-                ultima_rodada = rodadas_na_hora[-1]
-                break  # Encontramos a hora mais recente com dados
-
-        if not ultima_rodada:
-            logging.warning("Nenhuma rodada encontrada nos dados da API para o dia de hoje.")
+        if not data or not isinstance(data, list) or len(data) == 0:
+            logging.warning("API retornou uma resposta vazia ou em formato inesperado.")
             return None
 
-        # O ID da rodada na API v3 é um número inteiro
+        # O primeiro item da lista é o mais recente
+        ultima_rodada = data[0]
         id_rodada_atual = ultima_rodada.get("id")
 
         if id_rodada_atual == ultimo_id_rodada:
             return None  # Já processado
 
         ultimo_id_rodada = id_rodada_atual
-        # Na nova API, o resultado numérico está no campo "type"
-        numero = ultima_rodada.get("type")
+        numero_str = ultima_rodada.get("result")
 
-        if numero is not None and isinstance(numero, int):
+        if numero_str is not None and numero_str.isdigit():
+            numero = int(numero_str)
             logging.info(f"Número válido encontrado na API: {numero}")
             return numero
         else:
-            logging.warning(f"Resultado inválido ou não numérico na API: '{numero}'")
+            logging.warning(f"Resultado inválido ou não numérico na API: '{numero_str}'")
             return None
 
-    except httpx.RequestError as e:
-        logging.error(f"Erro ao acessar a API: {e}")
+    except httpx.HTTPStatusError as e:
+        logging.error(f"Erro ao acessar a API: Status {e.response.status_code}. A URL pode ter mudado ou o acesso foi bloqueado.")
         return None
     except Exception as e:
         logging.error(f"Erro ao processar dados da API: {e}")
         return None
+
 
 async def verificar_estrategias(bot, numero):
     """Verifica o número contra a lista de estratégias e envia alertas."""
@@ -125,8 +105,8 @@ async def main():
     try:
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
-        logging.info(f"Bot '{info_bot.first_name}' (API) inicializado com sucesso!")
-        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (API) conectado e monitorando.")
+        logging.info(f"Bot '{info_bot.first_name}' (API Final) inicializado com sucesso!")
+        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (API Final) conectado e monitorando.")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
