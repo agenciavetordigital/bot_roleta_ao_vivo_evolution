@@ -5,7 +5,6 @@ import time
 import logging
 import asyncio
 import telegram
-import json
 from telegram.constants import ParseMode
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -16,16 +15,15 @@ from selenium.webdriver.support import expected_conditions as EC
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_ID = os.environ.get('CHAT_ID')
-TIPMINER_USER = os.environ.get('TIPMINER_USER')
-TIPMINER_PASS = os.environ.get('TIPMINER_PASS')
+TIPMANAGER_USER = os.environ.get('TIPMANAGER_USER')
+TIPMANAGER_PASS = os.environ.get('TIPMANAGER_PASS')
 
-API_URL = "https://www.tipminer.com/api/v3/history/roulette/0194b473-1788-70dd-84a9-f1ddd4f00678?limit=200&subject=filter&timezone=America%2FSao_Paulo"
-URL_LOGIN = 'https://www.tipminer.com/br/login'
-
-if not all([TOKEN_BOT, CHAT_ID, TIPMINER_USER, TIPMINER_PASS]):
-    logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, TIPMINER_USER, TIPMINER_PASS) devem ser definidas!")
+if not all([TOKEN_BOT, CHAT_ID, TIPMANAGER_USER, TIPMANAGER_PASS]):
+    logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, TIPMANAGER_USER, TIPMANAGER_PASS) devem ser definidas!")
     exit()
 
+URL_ROLETA = 'https://app.tipmanager.net/casino-bot/roulette/last-results'
+URL_LOGIN = 'https://app.tipmanager.net/auth/login'
 INTERVALO_VERIFICACAO = 15
 
 # --- ESTRATÉGIAS DE ALERTA ---
@@ -39,7 +37,7 @@ ESTRATEGIAS = {
 
 # --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-ultimo_id_rodada = None
+ultimo_numero_encontrado = None
 
 def configurar_driver():
     """Configura e retorna uma instância do driver do Chrome."""
@@ -49,7 +47,11 @@ def configurar_driver():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     
+    # Caminhos dos executáveis instalados pelo Dockerfile
     caminho_driver = "/usr/bin/chromedriver"
+    caminho_navegador = "/usr/bin/chromium"
+    
+    chrome_options.binary_location = caminho_navegador
     service = ChromeService(executable_path=caminho_driver)
     driver = webdriver.Chrome(service=service, options=chrome_options)
     logging.info("Driver do Chrome configurado com sucesso.")
@@ -58,15 +60,15 @@ def configurar_driver():
 def fazer_login(driver):
     """Navega para a página de login e efetua o login do usuário."""
     try:
-        logging.info("Iniciando processo de login no Tipminer...")
+        logging.info("Iniciando processo de login no app.tipmanager.net...")
         driver.get(URL_LOGIN)
         wait = WebDriverWait(driver, 20)
 
         email_input = wait.until(EC.presence_of_element_located((By.NAME, "email")))
-        email_input.send_keys(TIPMINER_USER)
+        email_input.send_keys(TIPMANAGER_USER)
         
         password_input = driver.find_element(By.NAME, "password")
-        password_input.send_keys(TIPMINER_PASS)
+        password_input.send_keys(TIPMANAGER_PASS)
         
         login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         login_button.click()
@@ -80,45 +82,48 @@ def fazer_login(driver):
         return False
 
 async def buscar_ultimo_numero(driver):
-    """Usa a sessão logada do Selenium para buscar os dados da API."""
-    global ultimo_id_rodada
+    """Busca o número mais recente da roleta usando a sessão logada."""
+    global ultimo_numero_encontrado
     try:
-        # Navega diretamente para a URL da API com o navegador já logado
-        driver.get(API_URL)
+        driver.get(URL_ROLETA)
+        wait = WebDriverWait(driver, 30)
         
-        # O conteúdo da API estará dentro de uma tag <pre>
-        pre_element = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.TAG_NAME, "pre"))
+        # Seletor robusto para o container principal
+        history_container = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div[class*='LastResults_container']"))
         )
-        json_text = pre_element.text
-        data = json.loads(json_text)
-
-        if not data or not isinstance(data, list) or len(data) == 0:
-            logging.warning(f"API retornou uma resposta vazia ou em formato inesperado")
-            return None
-
-        ultima_rodada = data[0]
-        id_rodada_atual = ultima_rodada.get("id")
-
-        if id_rodada_atual == ultimo_id_rodada:
-            return None
-
-        ultimo_id_rodada = id_rodada_atual
-        numero_str = ultima_rodada.get("result")
         
-        if numero_str is not None and numero_str.isdigit():
+        # Pega o primeiro 'div' que é filho direto, que representa o número mais recente
+        primeiro_numero_div = history_container.find_element(By.XPATH, "./div[1]")
+        
+        # Dentro desse 'div', pega o 'span' que contém o número
+        numero_span = primeiro_numero_div.find_element(By.TAG_NAME, 'span')
+        
+        numero_str = numero_span.text.strip()
+        
+        if numero_str == ultimo_numero_encontrado:
+            return None
+
+        ultimo_numero_encontrado = numero_str
+        
+        if numero_str.isdigit():
             numero = int(numero_str)
-            logging.info(f"Número válido encontrado na API: {numero}")
+            logging.info(f"Número válido encontrado: {numero}")
             return numero
         else:
-            logging.warning(f"Resultado inválido ou não numérico na API: '{numero_str}'")
+            logging.warning(f"Texto encontrado não é um número válido: '{numero_str}'")
             return None
+
     except Exception as e:
-        logging.error(f"Erro ao buscar dados da API via Selenium: {e}")
+        logging.error(f"Erro ao buscar número com Selenium: {e}")
+        try:
+            logging.error(f"HTML da página no momento do erro: {driver.page_source[:2000]}")
+        except:
+             logging.error("Não foi possível obter o HTML da página para depuração.")
         return None
 
 async def verificar_estrategias(bot, numero):
-    """Verifica o número contra a lista de estratégias e envia alertas."""
+    """Verifica o número e envia alertas."""
     if numero is None:
         return
     for nome_estrategia, condicao in ESTRATEGIAS.items():
@@ -128,7 +133,7 @@ async def verificar_estrategias(bot, numero):
             await enviar_alerta(bot, mensagem)
 
 async def enviar_alerta(bot, mensagem):
-    """Envia uma mensagem para o chat configurado no Telegram."""
+    """Envia uma mensagem para o Telegram."""
     try:
         await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
         logging.info("Alerta enviado com sucesso!")
@@ -136,13 +141,13 @@ async def enviar_alerta(bot, mensagem):
         logging.error(f"Erro ao enviar mensagem para o Telegram: {e}")
 
 async def main():
-    """Função principal que inicializa o bot e inicia o monitoramento."""
+    """Função principal."""
     bot = None
     try:
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
-        logging.info(f"Bot '{info_bot.first_name}' (Final) inicializado com sucesso!")
-        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (Final) conectado. Tentando fazer login...")
+        logging.info(f"Bot '{info_bot.first_name}' (TipManager) inicializado com sucesso!")
+        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (TipManager) conectado. Tentando fazer login...")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
@@ -152,9 +157,9 @@ async def main():
         driver = configurar_driver()
         
         if not fazer_login(driver):
-            raise Exception("O login no Tipminer falhou.")
+            raise Exception("O login no TipManager falhou.")
         
-        await enviar_alerta(bot, "🔒 Login no Tipminer realizado com sucesso! Iniciando monitoramento.")
+        await enviar_alerta(bot, "🔒 Login no TipManager realizado com sucesso! Iniciando monitoramento.")
         
         while True:
             numero = await buscar_ultimo_numero(driver)
@@ -165,17 +170,15 @@ async def main():
     except Exception as e:
         logging.error(f"Um erro crítico ocorreu: {e}")
         if bot:
-            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: {e}")
+            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: {str(e)}")
     finally:
         if driver:
             driver.quit()
         logging.info("Driver do Selenium encerrado.")
-        # Adiciona um loop de reinicialização no final do main
         logging.info("O programa principal foi encerrado. Reiniciando em 1 minuto.")
         await asyncio.sleep(60)
 
 if __name__ == '__main__':
-    # Adiciona um loop externo para garantir que o bot sempre reinicie
     while True:
         try:
             asyncio.run(main())
