@@ -7,11 +7,14 @@ import telegram
 from telegram.constants import ParseMode
 import logging
 import asyncio
-import os # Biblioteca para acessar variáveis de ambiente
+import os
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
-# As configurações agora são lidas das variáveis de ambiente para segurança.
-# Você deve configurar TOKEN_BOT e CHAT_ID no painel da Railway.
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_ID = os.environ.get('CHAT_ID')
 
@@ -34,22 +37,33 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 ultimo_id_rodada = None
 
 def buscar_ultimo_numero():
-    """Busca o número mais recente da roleta no site."""
+    """Busca o número mais recente da roleta usando Selenium para renderizar o JavaScript."""
     global ultimo_id_rodada
+    
+    # Configurações do Selenium para rodar em um ambiente como o da Railway (sem interface gráfica)
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    
+    driver = webdriver.Chrome(options=options)
+    
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        driver.get(URL_ROLETA)
+        # Espera ATÉ 15 segundos para o container de números aparecer na página
+        wait = WebDriverWait(driver, 15)
+        container_locator = (By.CLASS_NAME, "flex.flex-wrap.gap-2.justify-center")
+        wait.until(EC.presence_of_element_located(container_locator))
         
-        response = requests.get(URL_ROLETA, headers=headers, timeout=15)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Pega o HTML da página DEPOIS que o JavaScript foi executado
+        html = driver.page_source
+        soup = BeautifulSoup(html, 'html.parser')
+        
         container_numeros = soup.find('div', class_='flex flex-wrap gap-2 justify-center')
         if not container_numeros:
-            logging.warning("Não foi possível encontrar o container de números no site.")
-            # Linha de diagnóstico adicionada para vermos o que o site está retornando
-            logging.warning(f"Início do HTML recebido: {response.text[:500]}")
+            logging.warning("Container de números não encontrado mesmo após a espera.")
             return None, None
 
         primeiro_numero_div = container_numeros.find('div')
@@ -68,15 +82,17 @@ def buscar_ultimo_numero():
         logging.info(f"Número mais recente encontrado: {numero}")
         return numero, id_rodada_atual
 
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Erro ao acessar a URL: {e}")
-        return None, None
-    except (ValueError, TypeError) as e:
-        logging.error(f"Não foi possível converter o valor para um número inteiro. Detalhe: {e}")
+    except TimeoutException:
+        logging.error("Tempo de espera esgotado. O container de números não apareceu na página.")
         return None, None
     except Exception as e:
-        logging.error(f"Ocorreu um erro inesperado ao buscar o número: {e}")
+        logging.error(f"Ocorreu um erro inesperado ao buscar o número com Selenium: {e}")
         return None, None
+    finally:
+        # Garante que o navegador seja fechado
+        driver.quit()
+
+# O restante do código permanece o mesmo...
 
 async def verificar_estrategias(bot, numero):
     """Verifica o número contra a lista de estratégias e envia alertas."""
@@ -108,7 +124,6 @@ async def enviar_alerta(bot, mensagem):
 
 async def main():
     """Função principal que inicializa o bot e inicia o monitoramento."""
-    # Validação para garantir que as variáveis de ambiente foram configuradas
     if not TOKEN_BOT or not CHAT_ID:
         logging.critical("As variáveis de ambiente TOKEN_BOT e CHAT_ID não foram configuradas na Railway.")
         return
@@ -117,7 +132,7 @@ async def main():
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' inicializado com sucesso!")
-        await enviar_alerta(bot, "✅ Bot monitor de roleta iniciado com sucesso! (Railway - Diagnóstico)")
+        await enviar_alerta(bot, "✅ Bot monitor de roleta iniciado com sucesso! (Railway - vFinal)")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Verifique seu token. Erro: {e}")
         return
