@@ -38,8 +38,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 ultimo_id_rodada = None
 
 def configurar_driver():
-    """Configura o driver do Chrome, especificando o caminho do executável."""
-    logging.info("Configurando o driver do Chrome com caminho explícito...")
+    """Configura o driver e o navegador Chrome, especificando os caminhos dos executáveis."""
+    logging.info("Configurando o driver e o navegador Chrome com caminhos explícitos...")
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
@@ -47,11 +47,14 @@ def configurar_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
+    # A MUDANÇA FINAL: Especificamos o caminho para o NAVEGADOR.
+    chrome_options.binary_location = "/usr/bin/google-chrome"
+    
     caminho_driver = "/usr/bin/chromedriver"
     service = ChromeService(executable_path=caminho_driver) 
     
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    logging.info("Driver do Chrome configurado com sucesso.")
+    logging.info("Driver e navegador Chrome configurados com sucesso.")
     return driver
 
 def buscar_ultimo_numero(driver):
