@@ -83,16 +83,18 @@ async def buscar_ultimo_numero(driver):
     """Usa a sessão logada do Selenium para buscar os dados da API."""
     global ultimo_id_rodada
     try:
-        # Usa JavaScript para fazer a requisição à API dentro do navegador já logado
-        script_fetch = f"""
-            return fetch('{API_URL}')
-                .then(response => response.json())
-                .catch(error => ({{'error': error.toString()}}));
-        """
-        data = driver.execute_script(script_fetch)
+        # Navega diretamente para a URL da API com o navegador já logado
+        driver.get(API_URL)
+        
+        # O conteúdo da API estará dentro de uma tag <pre>
+        pre_element = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, "pre"))
+        )
+        json_text = pre_element.text
+        data = json.loads(json_text)
 
-        if 'error' in data or not data or not isinstance(data, list) or len(data) == 0:
-            logging.warning(f"API retornou uma resposta vazia ou com erro: {data.get('error', 'Formato inesperado')}")
+        if not data or not isinstance(data, list) or len(data) == 0:
+            logging.warning(f"API retornou uma resposta vazia ou em formato inesperado")
             return None
 
         ultima_rodada = data[0]
@@ -168,9 +170,16 @@ async def main():
         if driver:
             driver.quit()
         logging.info("Driver do Selenium encerrado.")
-        logging.info("O programa será reiniciado em 1 minuto.")
+        # Adiciona um loop de reinicialização no final do main
+        logging.info("O programa principal foi encerrado. Reiniciando em 1 minuto.")
         await asyncio.sleep(60)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    # Adiciona um loop externo para garantir que o bot sempre reinicie
+    while True:
+        try:
+            asyncio.run(main())
+        except Exception as e:
+            logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
+            time.sleep(60)
 
