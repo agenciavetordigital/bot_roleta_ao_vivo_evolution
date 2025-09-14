@@ -66,7 +66,7 @@ def buscar_ultimo_numero(driver):
         driver.get(URL_ROLETA)
         wait = WebDriverWait(driver, 30)
         
-        # A MUDANÇA ESTRATÉGICA: Espera por um container mais estável com um atributo de dados
+        # Espera por um container mais estável com um atributo de dados
         history_container = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-history-content='true']"))
         )
@@ -85,7 +85,11 @@ def buscar_ultimo_numero(driver):
             return None
 
         ultimo_id_rodada = id_rodada_atual
-        numero_str = primeiro_numero_div.text.strip()
+        
+        # A MUDANÇA ESTRATÉGICA: Pega o texto do <span> dentro da div para evitar lixo
+        numero_span = primeiro_numero_div.find_element(By.TAG_NAME, 'span')
+        numero_str = numero_span.text.strip()
+        
         numero = int(numero_str)
         logging.info(f"Número mais recente encontrado: {numero}")
         return numero
