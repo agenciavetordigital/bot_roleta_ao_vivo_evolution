@@ -38,7 +38,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 ultimo_id_rodada = None
 
 def configurar_driver():
-    """Configura o driver e o navegador Chrome com caminhos explícitos."""
+    """Configura o driver e o navegador Chrome."""
     logging.info("Configurando o driver e o navegador Chrome...")
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--headless")
@@ -47,8 +47,8 @@ def configurar_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    # A MUDANÇA FINAL: Apontamos para o caminho exato do binário instalado pelo Dockerfile.
-    chrome_options.binary_location = "/usr/bin/google-chrome-stable"
+    # O pacote chromium instala o binário neste caminho padrão
+    chrome_options.binary_location = "/usr/bin/chromium"
         
     caminho_driver = "/usr/bin/chromedriver"
     service = ChromeService(executable_path=caminho_driver) 
@@ -121,7 +121,6 @@ async def main():
                 await verificar_estrategias(bot, numero)
             await asyncio.sleep(INTERVALO_VERIFICACAO)
     except Exception as e:
-        # Tratamento do erro de formatação do Telegram
         erro_tratado = str(e).replace("*", "").replace("_", "")
         logging.error(f"Um erro crítico ocorreu no loop principal: {erro_tratado}")
         if bot:
