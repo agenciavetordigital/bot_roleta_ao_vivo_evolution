@@ -38,8 +38,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 ultimo_id_rodada = None
 
 def configurar_driver():
-    """Configura o driver do Chrome, assumindo que ele já está instalado no sistema."""
-    logging.info("Configurando o driver do Chrome a partir do sistema...")
+    """Configura o driver do Chrome, especificando o caminho do executável."""
+    logging.info("Configurando o driver do Chrome com caminho explícito...")
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
@@ -47,9 +47,10 @@ def configurar_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    # O Selenium irá procurar por 'chromedriver' no PATH do sistema automaticamente.
-    # Não precisamos mais do webdriver-manager.
-    service = ChromeService() 
+    # A MUDANÇA FINAL: Fornecemos o caminho exato onde o apt instala o chromedriver.
+    # Isso elimina qualquer ambiguidade do sistema.
+    caminho_driver = "/usr/bin/chromedriver"
+    service = ChromeService(executable_path=caminho_driver) 
     
     driver = webdriver.Chrome(service=service, options=chrome_options)
     logging.info("Driver do Chrome configurado com sucesso.")
@@ -99,6 +100,7 @@ async def enviar_alerta(bot, mensagem):
 
 async def main():
     """Função principal que inicializa o bot e inicia o monitoramento."""
+    bot = None
     try:
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
@@ -119,21 +121,20 @@ async def main():
             await asyncio.sleep(INTERVALO_VERIFICACAO)
     except Exception as e:
         logging.error(f"Um erro crítico ocorreu no loop principal: {e}")
-        logging.info("Aguardando 60 segundos antes de tentar novamente...")
-        if driver:
-            driver.quit()
-        await asyncio.sleep(60)
-        # O ideal aqui seria um loop de reinicialização ou notificação
+        if bot:
+            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: {e}")
     finally:
         if driver:
             driver.quit()
+        logging.info("Processo principal finalizado.")
 
 if __name__ == '__main__':
     # Loop para tentar reiniciar o bot em caso de falha crítica
     while True:
         try:
             asyncio.run(main())
+            logging.info("O programa principal foi encerrado. Reiniciando em 1 minuto.")
         except Exception as e:
             logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
-            time.sleep(60)
+        time.sleep(60)
 
