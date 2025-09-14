@@ -15,17 +15,12 @@ from selenium.webdriver.support import expected_conditions as EC
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_ID = os.environ.get('CHAT_ID')
-# NOVAS VARIÁVEIS PARA O LOGIN
-TIPMINER_USER = os.environ.get('TIPMINER_USER')
-TIPMINER_PASS = os.environ.get('TIPMINER_PASS')
 
-
-if not all([TOKEN_BOT, CHAT_ID, TIPMINER_USER, TIPMINER_PASS]):
-    logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, TIPMINER_USER, TIPMINER_PASS) devem ser definidas!")
+if not TOKEN_BOT or not CHAT_ID:
+    logging.critical("As variáveis de ambiente TOKEN_BOT e CHAT_ID devem ser definidas!")
     exit()
 
 URL_ROLETA = 'https://www.tipminer.com/br/historico/evolution/roleta-ao-vivo'
-URL_LOGIN = 'https://www.tipminer.com/br/login'
 INTERVALO_VERIFICACAO = 15
 
 # --- ESTRATÉGIAS DE ALERTA ---
@@ -64,62 +59,22 @@ def configurar_driver():
     logging.info("Driver e navegador Chrome configurados com sucesso.")
     return driver
 
-def fazer_login(driver):
-    """Navega para a página de login e efetua o login do usuário."""
-    try:
-        logging.info("Iniciando processo de login no Tipminer...")
-        driver.get(URL_LOGIN)
-        wait = WebDriverWait(driver, 20)
-
-        email_input = wait.until(EC.presence_of_element_located((By.NAME, "email")))
-        email_input.send_keys(TIPMINER_USER)
-        logging.info("E-mail preenchido.")
-
-        password_input = driver.find_element(By.NAME, "password")
-        password_input.send_keys(TIPMINER_PASS)
-        logging.info("Senha preenchida.")
-
-        login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-        login_button.click()
-        logging.info("Botão de login clicado.")
-        
-        # MUDANÇA ESTRATÉGICA: Espera a URL mudar, indicando que saímos da página de login
-        wait.until(EC.url_changes(URL_LOGIN))
-        logging.info("Redirecionamento após login detectado.")
-        
-        # Garante que estamos na página correta
-        logging.info("Navegando para a página da roleta para garantir...")
-        driver.get(URL_ROLETA)
-
-        # Agora sim, espera o conteúdo carregar
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-history-content='true']")))
-        logging.info("Login realizado com sucesso! Conteúdo da página de roleta carregado.")
-        return True
-
-    except Exception as e:
-        logging.error(f"Falha no processo de login: {e}")
-        try:
-            # Tenta capturar informações de depuração
-            current_url = driver.current_url
-            page_source = driver.page_source
-            logging.error(f"URL atual no momento da falha: {current_url}")
-            logging.error(f"HTML da página no momento da falha (primeiros 1000 caracteres): {page_source[:1000]}")
-        except Exception as debug_e:
-            logging.error(f"Erro adicional ao tentar obter informações de depuração: {debug_e}")
-        return False
-
 def buscar_ultimo_numero(driver):
     """Busca o número mais recente da roleta usando Selenium."""
     global ultimo_id_rodada
     try:
+        driver.get(URL_ROLETA)
         wait = WebDriverWait(driver, 30)
         
+        # Espera por um container mais estável com um atributo de dados
         history_container = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-history-content='true']"))
         )
         
+        # Agora, busca o container dos números DENTRO do container de histórico
         container_numeros = history_container.find_element(By.CSS_SELECTOR, "div.gap-2")
 
+        # Espera que o primeiro número dentro do container seja visível
         primeiro_numero_div = wait.until(
             EC.visibility_of(container_numeros.find_element(By.TAG_NAME, 'div'))
         )
@@ -131,6 +86,7 @@ def buscar_ultimo_numero(driver):
 
         ultimo_id_rodada = id_rodada_atual
         
+        # A MUDANÇA ESTRATÉGICA: Pega o texto do <span> dentro da div para evitar lixo
         numero_span = primeiro_numero_div.find_element(By.TAG_NAME, 'span')
         numero_str = numero_span.text.strip()
         
@@ -166,7 +122,7 @@ async def main():
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' inicializado com sucesso!")
-        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' conectado e tentando fazer login...")
+        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' conectado e monitorando!")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
@@ -174,13 +130,7 @@ async def main():
     driver = None
     try:
         driver = configurar_driver()
-        
-        if not fazer_login(driver):
-            await enviar_alerta(bot, "❌ Falha no login do Tipminer. Verifique as credenciais e reinicie o bot.")
-            raise Exception("O login no Tipminer falhou.")
-
-        await enviar_alerta(bot, "🔒 Login no Tipminer realizado com sucesso! Iniciando monitoramento.")
-        
+        logging.info("Iniciando monitoramento da roleta...")
         while True:
             numero = buscar_ultimo_numero(driver)
             if numero is not None:
