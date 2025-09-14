@@ -1,0 +1,29 @@
+Arquivo de configuração para o Nixpacks (sistema de build da Railway)
+[phases.setup]
+
+Instala os pacotes do sistema necessários para o Google Chrome/Chromedriver rodar
+em um ambiente Linux sem interface gráfica.
+nixPkgs = [
+"pkgs.stdenv.cc.cc.lib",
+"pkgs.glib",
+"pkgs.nss",
+"pkgs.fontconfig",
+"pkgs.freetype",
+"pkgs.xorg.libX11",
+"pkgs.xorg.libXcomposite",
+"pkgs.xorg.libXcursor",
+"pkgs.xorg.libXdamage",
+"pkgs.xorg.libXext",
+"pkgs.xorg.libXfixes",
+"pkgs.xorg.libXi",
+"pkgs.xorg.libXrandr",
+"pkgs.xorg.libXrender",
+"pkgs.xorg.libXtst",
+"pkgs.cups",
+"pkgs.dbus",
+"pkgs.expat",
+"pkgs.alsa-lib",
+"pkgs.xorg.libxkbcommon",
+"pkgs.at-spi2-atk",
+"pkgs.pangox-compat"
+]
