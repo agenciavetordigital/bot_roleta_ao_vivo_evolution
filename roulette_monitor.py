@@ -5,7 +5,7 @@ import time
 import logging
 import asyncio
 import telegram
-import httpx
+import json
 from telegram.constants import ParseMode
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -26,7 +26,7 @@ if not all([TOKEN_BOT, CHAT_ID, TIPMINER_USER, TIPMINER_PASS]):
     logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, TIPMINER_USER, TIPMINER_PASS) devem ser definidas!")
     exit()
 
-INTERVALO_VERIFICACAO = 10
+INTERVALO_VERIFICACAO = 15
 
 # --- ESTRATÉGIAS DE ALERTA ---
 ESTRATEGIAS = {
@@ -41,23 +41,23 @@ ESTRATEGIAS = {
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ultimo_id_rodada = None
 
-def obter_cookies_de_login():
-    """Usa o Selenium para fazer login e retorna os cookies de sessão."""
-    driver = None
+def configurar_driver():
+    """Configura e retorna uma instância do driver do Chrome."""
+    logging.info("Configurando o driver do Chrome...")
+    chrome_options = webdriver.ChromeOptions()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    caminho_driver = "/usr/bin/chromedriver"
+    service = ChromeService(executable_path=caminho_driver)
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    logging.info("Driver do Chrome configurado com sucesso.")
+    return driver
+
+def fazer_login(driver):
+    """Navega para a página de login e efetua o login do usuário."""
     try:
-        logging.info("Configurando o driver do Chrome para obter cookies...")
-        chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        
-        # REMOVIDO: Deixar o Selenium encontrar o navegador automaticamente
-        # chrome_options.binary_location = "/usr/bin/chromium" 
-        
-        caminho_driver = "/usr/bin/chromedriver"
-        service = ChromeService(executable_path=caminho_driver)
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        
         logging.info("Iniciando processo de login no Tipminer...")
         driver.get(URL_LOGIN)
         wait = WebDriverWait(driver, 20)
@@ -71,31 +71,28 @@ def obter_cookies_de_login():
         login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         login_button.click()
         
-        wait.until(EC.url_changes(URL_LOGIN))
-        logging.info("Login realizado com sucesso! Capturando cookies...")
-        
-        cookies_selenium = driver.get_cookies()
-        cookies_httpx = {cookie['name']: cookie['value'] for cookie in cookies_selenium}
-        
-        return cookies_httpx
-    finally:
-        if driver:
-            driver.quit()
+        # Espera por um elemento da página principal para confirmar o login
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "nav[aria-label='Main']")))
+        logging.info("Login realizado com sucesso!")
+        return True
+    except Exception as e:
+        logging.error(f"Falha no processo de login: {e}")
+        return False
 
-async def buscar_ultimo_numero(client):
-    """Busca o número mais recente da roleta na API usando os cookies de sessão."""
+async def buscar_ultimo_numero(driver):
+    """Usa a sessão logada do Selenium para buscar os dados da API."""
     global ultimo_id_rodada
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Referer': 'https://www.tipminer.com/br/historico/evolution/roleta-ao-vivo'
-        }
-        response = await client.get(API_URL, headers=headers, timeout=15)
-        response.raise_for_status()
-        data = response.json()
+        # Usa JavaScript para fazer a requisição à API dentro do navegador já logado
+        script_fetch = f"""
+            return fetch('{API_URL}')
+                .then(response => response.json())
+                .catch(error => ({{'error': error.toString()}}));
+        """
+        data = driver.execute_script(script_fetch)
 
-        if not data or not isinstance(data, list) or len(data) == 0:
-            logging.warning("API retornou uma resposta vazia ou em formato inesperado, mesmo com login.")
+        if 'error' in data or not data or not isinstance(data, list) or len(data) == 0:
+            logging.warning(f"API retornou uma resposta vazia ou com erro: {data.get('error', 'Formato inesperado')}")
             return None
 
         ultima_rodada = data[0]
@@ -115,7 +112,7 @@ async def buscar_ultimo_numero(client):
             logging.warning(f"Resultado inválido ou não numérico na API: '{numero_str}'")
             return None
     except Exception as e:
-        logging.error(f"Erro ao processar dados da API: {e}")
+        logging.error(f"Erro ao buscar dados da API via Selenium: {e}")
         return None
 
 async def verificar_estrategias(bot, numero):
@@ -142,32 +139,38 @@ async def main():
     try:
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
-        logging.info(f"Bot '{info_bot.first_name}' (Híbrido) inicializado com sucesso!")
-        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (Híbrido) conectado. Tentando fazer login...")
+        logging.info(f"Bot '{info_bot.first_name}' (Final) inicializado com sucesso!")
+        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (Final) conectado. Tentando fazer login...")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
 
+    driver = None
     try:
-        session_cookies = obter_cookies_de_login()
-        if not session_cookies:
-            raise Exception("Não foi possível obter os cookies de sessão.")
+        driver = configurar_driver()
         
-        await enviar_alerta(bot, "🔒 Login no Tipminer realizado com sucesso! Iniciando monitoramento da API.")
+        if not fazer_login(driver):
+            raise Exception("O login no Tipminer falhou.")
         
-        async with httpx.AsyncClient(cookies=session_cookies) as client:
-            while True:
-                numero = await buscar_ultimo_numero(client)
-                if numero is not None:
-                    await verificar_estrategias(bot, numero)
-                await asyncio.sleep(INTERVALO_VERIFICACAO)
+        await enviar_alerta(bot, "🔒 Login no Tipminer realizado com sucesso! Iniciando monitoramento.")
+        
+        while True:
+            numero = await buscar_ultimo_numero(driver)
+            if numero is not None:
+                await verificar_estrategias(bot, numero)
+            await asyncio.sleep(INTERVALO_VERIFICACAO)
 
     except Exception as e:
         logging.error(f"Um erro crítico ocorreu: {e}")
         if bot:
             await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: {e}")
+    finally:
+        if driver:
+            driver.quit()
+        logging.info("Driver do Selenium encerrado.")
         logging.info("O programa será reiniciado em 1 minuto.")
         await asyncio.sleep(60)
 
 if __name__ == '__main__':
     asyncio.run(main())
+
