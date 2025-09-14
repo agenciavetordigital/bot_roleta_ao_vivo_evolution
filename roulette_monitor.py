@@ -81,12 +81,15 @@ def fazer_login(driver):
         login_button.click()
         logging.info("Botão de login clicado.")
         
+        # Espera por um redirecionamento, indicando que o login foi processado
         wait.until(EC.url_changes(URL_LOGIN))
         logging.info("Redirecionamento após login detectado.")
         
+        # Garante que estamos na página correta
         logging.info("Navegando para a página da roleta para garantir...")
         driver.get(URL_ROLETA)
 
+        # Confirma que o conteúdo da página carregou
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-history-content='true']")))
         logging.info("Login realizado com sucesso! Conteúdo da página de roleta carregado.")
         return True
@@ -106,39 +109,53 @@ def buscar_ultimo_numero(driver):
     """Busca o número mais recente da roleta usando Selenium."""
     global ultimo_id_rodada
     try:
+        # Garante que estamos na página certa antes de cada busca
+        if driver.current_url != URL_ROLETA:
+            driver.get(URL_ROLETA)
+            
         wait = WebDriverWait(driver, 30)
         
+        # 1. Encontra o container principal que guarda o histórico
         history_container = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-history-content='true']"))
         )
         
+        # 2. Encontra o container específico dos números
         container_numeros = history_container.find_element(By.CSS_SELECTOR, "div.gap-2")
 
-        # Pega apenas spans que correspondem ao estilo dos números
-        spans_numeros = container_numeros.find_elements(
-            By.CSS_SELECTOR, "span.flex.justify-center.items-center"
-        )
+        # 3. Pega o primeiro 'div' filho, que é sempre o número mais recente
+        primeiro_numero_div = container_numeros.find_element(By.XPATH, "./div[1]")
+        
+        # Usa o HTML interno como um identificador único para a rodada
+        id_rodada_atual = primeiro_numero_div.get_attribute('innerHTML')
 
-        for span in spans_numeros:
-            texto = span.text.strip()
-            logging.info(f"Span candidato -> '{texto}'")
+        if id_rodada_atual == ultimo_id_rodada:
+            return None # Número já processado
 
-            if texto.isdigit() and 0 <= int(texto) <= 36:
-                id_rodada_atual = texto
-                if id_rodada_atual == ultimo_id_rodada:
-                    return None
-
-                ultimo_id_rodada = id_rodada_atual
-                numero = int(texto)
-                logging.info(f"Número válido encontrado: {numero}")
-                return numero
-
-        logging.warning("Nenhum número válido encontrado nos spans capturados.")
-        return None
+        ultimo_id_rodada = id_rodada_atual
+        
+        # 4. Encontra o 'span' DENTRO do 'div' do número mais recente
+        numero_span = primeiro_numero_div.find_element(By.TAG_NAME, 'span')
+        texto = numero_span.text.strip()
+        
+        if texto.isdigit() and 0 <= int(texto) <= 36:
+            numero = int(texto)
+            logging.info(f"Número válido encontrado: {numero}")
+            return numero
+        else:
+            logging.warning(f"Texto encontrado no span não é um número válido: '{texto}'")
+            return None
 
     except Exception as e:
         logging.error(f"Erro ao buscar número com Selenium: {e}")
+        # Tira um print da tela para diagnóstico
+        try:
+            driver.save_screenshot('error_screenshot.png')
+            logging.info("Screenshot de erro salvo como 'error_screenshot.png'")
+        except Exception as e_ss:
+            logging.error(f"Falha ao salvar screenshot: {e_ss}")
         return None
+
 
 async def verificar_estrategias(bot, numero):
     """Verifica o número contra a lista de estratégias e envia alertas."""
@@ -203,3 +220,4 @@ if __name__ == '__main__':
         except Exception as e:
             logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
         time.sleep(60)
+
