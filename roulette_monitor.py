@@ -6,8 +6,11 @@ import logging
 import asyncio
 import telegram
 from telegram.constants import ParseMode
-import cloudscraper # A nossa nova ferramenta anti-CAPTCHA
-from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
@@ -17,7 +20,6 @@ if not all([TOKEN_BOT, CHAT_ID]):
     logging.critical("As variáveis de ambiente TOKEN_BOT e CHAT_ID devem ser definidas!")
     exit()
 
-# Voltamos para a URL original do TipMiner, que é pública
 URL_ROLETA = 'https://www.tipminer.com/br/historico/evolution/roleta-ao-vivo'
 INTERVALO_VERIFICACAO = 15
 
@@ -33,27 +35,38 @@ ESTRATEGIAS = {
 # --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ultimo_numero_encontrado = None
-scraper = cloudscraper.create_scraper() # Cria uma instância do nosso "navegador" especial
 
-def buscar_ultimo_numero():
-    """Busca o número mais recente da roleta usando o cloudscraper."""
+def configurar_driver():
+    """Configura e retorna uma instância do driver do Chrome."""
+    logging.info("Configurando o driver do Chrome...")
+    chrome_options = webdriver.ChromeOptions()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    # Caminhos para os executáveis instalados pelo Dockerfile
+    chrome_options.binary_location = "/usr/bin/chromium"
+    caminho_driver = "/usr/bin/chromedriver"
+    
+    service = ChromeService(executable_path=caminho_driver)
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    logging.info("Driver do Chrome configurado com sucesso.")
+    return driver
+
+async def buscar_ultimo_numero(driver):
+    """Busca o número mais recente da roleta usando Selenium."""
     global ultimo_numero_encontrado
     try:
-        response = scraper.get(URL_ROLETA)
-        response.raise_for_status() # Garante que a requisição foi bem-sucedida
+        driver.get(URL_ROLETA)
+        wait = WebDriverWait(driver, 30)
         
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Espera pelo container de números carregar
+        container_numeros = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.flex.flex-wrap.gap-2.justify-center"))
+        )
         
-        container_numeros = soup.find('div', class_='flex flex-wrap gap-2 justify-center')
-        if not container_numeros:
-            logging.warning("Container de números não encontrado. O site pode ter mudado.")
-            return None
-
-        primeiro_numero_div = container_numeros.find('div')
-        if not primeiro_numero_div:
-            logging.warning("Div do primeiro número não encontrada.")
-            return None
-            
+        # Encontra o primeiro div dentro do container, que é o número mais recente
+        primeiro_numero_div = container_numeros.find_element(By.TAG_NAME, "div")
         numero_str = primeiro_numero_div.text.strip()
         
         if numero_str == ultimo_numero_encontrado:
@@ -70,7 +83,7 @@ def buscar_ultimo_numero():
             return None
 
     except Exception as e:
-        logging.error(f"Erro ao buscar número: {e}")
+        logging.error(f"Erro ao buscar número com Selenium: {e}")
         return None
 
 async def verificar_estrategias(bot, numero):
@@ -97,22 +110,38 @@ async def main():
     try:
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
-        logging.info(f"Bot '{info_bot.first_name}' (Cloudscraper) inicializado com sucesso!")
-        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (Cloudscraper) conectado e monitorando!")
+        logging.info(f"Bot '{info_bot.first_name}' (Selenium) inicializado com sucesso!")
+        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (Selenium) conectado e monitorando!")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
 
-    while True:
-        try:
-            numero = buscar_ultimo_numero()
+    driver = None
+    try:
+        driver = configurar_driver()
+        
+        while True:
+            numero = await buscar_ultimo_numero(driver)
             if numero is not None:
                 await verificar_estrategias(bot, numero)
             await asyncio.sleep(INTERVALO_VERIFICACAO)
-        except Exception as e:
-            logging.error(f"Um erro crítico ocorreu no loop principal: {e}")
-            await asyncio.sleep(60) # Espera mais tempo em caso de erro grave
+
+    except Exception as e:
+        logging.error(f"Um erro crítico ocorreu: {e}")
+        if bot:
+            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: {str(e)}")
+    finally:
+        if driver:
+            driver.quit()
+        logging.info("Driver do Selenium encerrado.")
+        logging.info("O programa principal foi encerrado. Reiniciando em 1 minuto.")
+        await asyncio.sleep(60)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    while True:
+        try:
+            asyncio.run(main())
+        except Exception as e:
+            logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
+            time.sleep(60)
 
