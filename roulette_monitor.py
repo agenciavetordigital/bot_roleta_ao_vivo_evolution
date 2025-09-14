@@ -6,24 +6,26 @@ import logging
 import asyncio
 import telegram
 from telegram.constants import ParseMode
-from bs4 import BeautifulSoup
-
-# Importações do Selenium e do Webdriver-Manager
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+# A alteração principal: usamos o gerenciador para o Chromium
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.os_manager import ChromeType
 
-# --- CONFIGURAÇÕES ESSENCIAIS (VIA VARIÁVEIS DE AMBIENTE) ---
-# Estas variáveis devem ser configuradas no painel da Railway
+# --- CONFIGURAÇÕES ESSENCIAIS ---
+# As configurações agora são lidas das variáveis de ambiente
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_ID = os.environ.get('CHAT_ID')
 
-# --- CONFIGURAÇÕES DO BOT ---
+if not TOKEN_BOT or not CHAT_ID:
+    logging.critical("As variáveis de ambiente TOKEN_BOT e CHAT_ID devem ser definidas!")
+    exit()
+
 URL_ROLETA = 'https://www.tipminer.com/br/historico/evolution/roleta-ao-vivo'
-INTERVALO_VERIFICACAO = 15 # Segundos
+INTERVALO_VERIFICACAO = 15  # Segundos
 
 # --- ESTRATÉGIAS DE ALERTA ---
 ESTRATEGIAS = {
@@ -39,57 +41,42 @@ ESTRATEGIAS = {
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ultimo_id_rodada = None
 
-def configurar_driver_selenium():
-    """Configura e retorna uma instância do WebDriver do Selenium."""
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    
+def configurar_driver():
+    """Configura e retorna uma instância do driver do Chrome usando webdriver-manager."""
     logging.info("Configurando o driver do Chrome com webdriver-manager...")
+    chrome_options = webdriver.ChromeOptions()
+    # Opções essenciais para rodar em um ambiente de servidor (headless)
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920x1080")
     
-    # A MUDANÇA PRINCIPAL: O webdriver-manager baixa e gerencia o chromedriver automaticamente
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    # A MUDANÇA: Dizemos ao manager para instalar o driver para o CHROMIUM
+    service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
     
-    logging.info("Driver configurado com sucesso.")
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    logging.info("Driver do Chrome configurado com sucesso.")
     return driver
 
 def buscar_ultimo_numero(driver):
     """Busca o número mais recente da roleta usando Selenium."""
     global ultimo_id_rodada
-
     try:
-        logging.info(f"Acessando a URL: {URL_ROLETA}")
         driver.get(URL_ROLETA)
-
-        # Espera o container de números carregar (até 20 segundos)
-        wait = WebDriverWait(driver, 20)
+        # Espera explicitamente até que o container de números esteja presente na página
+        wait = WebDriverWait(driver, 20) # Aumenta o tempo de espera para 20 segundos
         container_numeros = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".flex.flex-wrap.gap-2.justify-center"))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.flex.flex-wrap.gap-2.justify-center"))
         )
         
-        # Pega o HTML da página depois que o JavaScript carregou
-        html_completo = driver.page_source
-        soup = BeautifulSoup(html_completo, 'html.parser')
+        primeiro_numero_div = container_numeros.find_element(By.TAG_NAME, 'div')
         
-        # Reencontra o elemento no BeautifulSoup para garantir consistência
-        container_soup = soup.find('div', class_='flex flex-wrap gap-2 justify-center')
-        if not container_soup:
-            logging.warning("Não foi possível encontrar o container de números no HTML processado.")
-            return None
+        # Usamos o conteúdo da div como um ID único para a rodada
+        id_rodada_atual = primeiro_numero_div.get_attribute('innerHTML')
 
-        primeiro_numero_div = container_soup.find('div')
-        if not primeiro_numero_div:
-            logging.warning("Não foi possível encontrar a div do último número.")
-            return None
-            
-        id_rodada_atual = str(primeiro_numero_div)
         if id_rodada_atual == ultimo_id_rodada:
-            return None # Nenhum número novo, não faz nada
+            return None # Nenhum número novo, retorna None
 
         ultimo_id_rodada = id_rodada_atual
         
@@ -98,18 +85,27 @@ def buscar_ultimo_numero(driver):
         logging.info(f"Número mais recente encontrado: {numero}")
         return numero
 
-    except (ValueError, TypeError):
-        logging.error(f"Não foi possível converter o valor '{numero_str}' para um número inteiro.")
-        return None
     except Exception as e:
-        logging.error(f"Ocorreu um erro inesperado ao buscar o número: {e}")
-        # Tira um print da tela para ajudar a depurar o erro
+        logging.error(f"Erro ao buscar número com Selenium: {e}")
+        # Tira um screenshot da página para depuração em caso de erro
         try:
-            driver.save_screenshot('error_screenshot.png')
+            driver.save_screenshot("error_screenshot.png")
             logging.info("Screenshot de erro salvo em 'error_screenshot.png'")
-        except Exception as screenshot_error:
-            logging.error(f"Falha ao salvar o screenshot de erro: {screenshot_error}")
+        except Exception as se:
+            logging.error(f"Não foi possível salvar o screenshot: {se}")
         return None
+
+
+async def verificar_estrategias(bot, numero):
+    """Verifica o número contra a lista de estratégias e envia alertas."""
+    if numero is None:
+        return
+
+    for nome_estrategia, condicao in ESTRATEGIAS.items():
+        if condicao(numero):
+            mensagem = f"🎯 Gatilho Encontrado! 🎯\n\nEstratégia: *{nome_estrategia}*\nNúmero Sorteado: *{numero}*"
+            logging.info(f"Condição da estratégia '{nome_estrategia}' atendida. Enviando alerta...")
+            await enviar_alerta(bot, mensagem)
 
 async def enviar_alerta(bot, mensagem):
     """Envia uma mensagem para o chat configurado no Telegram."""
@@ -121,42 +117,31 @@ async def enviar_alerta(bot, mensagem):
 
 async def main():
     """Função principal que inicializa o bot e inicia o monitoramento."""
-    if not TOKEN_BOT or not CHAT_ID:
-        logging.critical("As variáveis de ambiente TOKEN_BOT e CHAT_ID não foram definidas. Encerrando.")
-        return
-
     try:
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' inicializado com sucesso!")
-        await enviar_alerta(bot, "✅ Bot monitor de roleta iniciado com sucesso!")
+        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' conectado e monitorando!")
     except Exception as e:
-        logging.critical(f"Não foi possível conectar ao Telegram. Verifique seu token. Erro: {e}")
+        logging.critical(f"Não foi possível conectar ao Telegram. Verifique seu token e CHAT_ID. Erro: {e}")
         return
 
-    driver = None
-    try:
-        driver = configurar_driver_selenium()
-        logging.info("Iniciando monitoramento da roleta...")
-        while True:
+    driver = configurar_driver()
+    
+    logging.info("Iniciando monitoramento da roleta...")
+    while True:
+        try:
             numero = buscar_ultimo_numero(driver)
             if numero is not None:
-                # Verifica as estratégias se encontrou um número novo
-                for nome_estrategia, condicao in ESTRATEGIAS.items():
-                    if condicao(numero):
-                        mensagem = f"🎯 *Gatilho Encontrado!*\n\n*Estratégia:* {nome_estrategia}\n*Número:* {numero}"
-                        await enviar_alerta(bot, mensagem)
-            
+                await verificar_estrategias(bot, numero)
             await asyncio.sleep(INTERVALO_VERIFICACAO)
-    except Exception as e:
-        logging.error(f"Um erro crítico ocorreu no loop principal: {e}")
-        logging.info("Aguardando 60 segundos antes de tentar novamente...")
-        await asyncio.sleep(60)
-    finally:
-        if driver:
-            driver.quit()
-        await enviar_alerta(bot, "❌ Bot monitor de roleta foi encerrado.")
-        logging.info("Driver do Selenium encerrado.")
+        except Exception as e:
+            logging.error(f"Um erro crítico ocorreu no loop principal: {e}")
+            logging.info("Aguardando 60 segundos antes de tentar novamente...")
+            if driver:
+                driver.quit() # Encerra o driver atual
+            driver = configurar_driver() # Tenta reiniciar o driver
+            await asyncio.sleep(60)
 
 if __name__ == '__main__':
     asyncio.run(main())
