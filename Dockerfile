@@ -19,10 +19,11 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --d
 RUN echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
 
 # Atualiza a lista de pacotes e instala o Chrome e o Chromedriver
+# CORREÇÃO: O nome do pacote do driver no repositório Debian é 'chromium-driver'
 RUN apt-get update \
     && apt-get install -y \
     google-chrome-stable \
-    chromedriver \
+    chromium-driver \
     --no-install-recommends \
     && apt-get purge -y --auto-remove wget \
     && rm -rf /var/lib/apt/lists/*
