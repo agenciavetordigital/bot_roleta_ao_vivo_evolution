@@ -4,16 +4,22 @@ FROM python:3.11-slim
 # Define o diretório de trabalho no container
 WORKDIR /app
 
-# Instala dependências do sistema para o Chrome
+# Instala dependências do sistema essenciais para adicionar novos repositórios e para o Chrome
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
+    ca-certificates \
     --no-install-recommends
 
-# Baixa e instala a versão estável mais recente do Google Chrome e o Chromedriver
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update \
+# MÉTODO MODERNO E CORRETO PARA ADICIONAR A CHAVE DO GOOGLE CHROME
+# Baixa a chave, converte para o formato GPG e salva no diretório correto
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg
+
+# Adiciona o repositório do Google Chrome, apontando para a chave que acabamos de salvar
+RUN echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
+
+# Atualiza a lista de pacotes e instala o Chrome e o Chromedriver
+RUN apt-get update \
     && apt-get install -y \
     google-chrome-stable \
     chromedriver \
