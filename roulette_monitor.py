@@ -5,6 +5,8 @@ import time
 import logging
 import asyncio
 import telegram
+import json
+import re
 from telegram.constants import ParseMode
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -23,8 +25,8 @@ if not all([TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS]):
     logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS) devem ser definidas!")
     exit()
 
-URL_ROLETA = 'https://jv.padroesdecassino.com.br/sistema/roletabrasileira'
 URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
+API_URL = 'https://api.padroesdecassino.com.br/roletabrasileira-brbet.php'
 INTERVALO_VERIFICACAO = 15
 
 # --- ESTRATÉGIAS DE ALERTA ---
@@ -49,14 +51,13 @@ def configurar_driver():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     
-    # Deixa o Selenium encontrar o driver instalado pelo Dockerfile
     service = ChromeService() 
     driver = webdriver.Chrome(service=service, options=chrome_options)
     logging.info("Driver do Chrome configurado com sucesso.")
     return driver
 
 def fazer_login(driver):
-    """Navega para a página de login e efetua o login do usuário."""
+    """Realiza o login no site para obter uma sessão autenticada."""
     try:
         logging.info("Iniciando processo de login no Padrões de Cassino...")
         driver.get(URL_LOGIN)
@@ -74,58 +75,58 @@ def fazer_login(driver):
         login_button.click()
         logging.info("Botão de login clicado.")
         
-        wait.until(EC.url_contains("sistema"))
-        logging.info("Login realizado com sucesso! Redirecionado da página de login.")
+        # Espera por um elemento da página pós-login para confirmar sucesso
+        wait.until(EC.presence_of_element_located((By.ID, "menu")))
+        logging.info("Login realizado com sucesso!")
         return True
 
     except Exception as e:
         logging.error(f"Falha no processo de login: {e}")
-        try:
-            logging.error(f"URL atual no momento do erro: {driver.current_url}")
-            logging.error(f"HTML da página no momento do erro: {driver.page_source[:2000]}")
-        except Exception as debug_e:
-            logging.error(f"Erro adicional ao tentar obter informações de depuração: {debug_e}")
         return False
 
-def buscar_ultimo_numero(driver):
-    """Busca o número mais recente da roleta."""
+def buscar_ultimo_numero_api(driver):
+    """Usa a sessão do navegador logado para buscar os dados diretamente da API."""
     global ultimo_numero_encontrado
     try:
-        if driver.current_url != URL_ROLETA:
-            driver.get(URL_ROLETA)
-        else:
-            # Se já estamos na página, apenas atualizamos para pegar novos dados
-            driver.refresh()
+        # Usa o driver para ir até a URL da API
+        driver.get(API_URL)
+        
+        # O conteúdo da API é o corpo da página
+        api_response_text = driver.find_element(By.TAG_NAME, 'body').text
 
-        wait = WebDriverWait(driver, 30)
-        
-        # MUDANÇA ESTRATÉGICA: Espera diretamente pelo primeiro número a aparecer
-        primeiro_numero_element = wait.until(
-             EC.presence_of_element_located((By.CSS_SELECTOR, "#dados > div"))
-        )
-        
-        numero_str = primeiro_numero_element.text.strip()
+        # Extrai a lista de dados da variável javascript 'roletaData'
+        match = re.search(r"var roletaData = (\[.*?\]);", api_response_text)
+        if not match:
+            logging.warning("Padrão 'roletaData' não encontrado na resposta da API.")
+            return None
+            
+        json_data = json.loads(match.group(1))
+
+        if not json_data:
+            logging.warning("API retornou uma lista de dados vazia.")
+            return None
+
+        # O primeiro item da lista é o mais recente
+        ultimo_resultado = json_data[0]
+        numero_str = ultimo_resultado.get("numero")
         
         if numero_str == ultimo_numero_encontrado:
             return None
 
         ultimo_numero_encontrado = numero_str
         
-        if numero_str.isdigit():
+        if numero_str is not None and numero_str.isdigit():
             numero = int(numero_str)
-            logging.info(f"Número válido encontrado: {numero}")
+            logging.info(f"Número válido encontrado via API: {numero}")
             return numero
         else:
-            logging.warning(f"Texto encontrado não é um número válido: '{numero_str}'")
+            logging.warning(f"Dado encontrado na API não é um número válido: '{numero_str}'")
             return None
 
     except Exception as e:
-        logging.error(f"Erro ao buscar número com Selenium: {e}")
-        try:
-            logging.error(f"HTML da página no momento do erro: {driver.page_source[:2000]}")
-        except:
-            pass
+        logging.error(f"Erro ao processar dados da API: {e}")
         return None
+
 
 async def verificar_estrategias(bot, numero):
     """Verifica o número e envia alertas."""
@@ -165,7 +166,8 @@ async def main():
             raise Exception("O login no Padrões de Cassino falhou.")
         
         while True:
-            numero = buscar_ultimo_numero(driver)
+            # USA A NOVA FUNÇÃO DE BUSCA PELA API
+            numero = buscar_ultimo_numero_api(driver)
             if numero is not None:
                 await verificar_estrategias(bot, numero)
             await asyncio.sleep(INTERVALO_VERIFICACAO)
