@@ -62,11 +62,13 @@ def fazer_login(driver):
         driver.get(URL_LOGIN)
         wait = WebDriverWait(driver, 20)
 
-        email_input = wait.until(EC.presence_of_element_located((By.ID, "email")))
+        # SELETORES CORRIGIDOS
+        email_input = wait.until(EC.presence_of_element_located((By.ID, "loginclienteform-email")))
         email_input.send_keys(PADROES_USER)
         logging.info("E-mail preenchido.")
 
-        password_input = driver.find_element(By.ID, "password")
+        # SELETORES CORRIGIDOS
+        password_input = driver.find_element(By.ID, "senha")
         password_input.send_keys(PADROES_PASS)
         logging.info("Senha preenchida.")
         
