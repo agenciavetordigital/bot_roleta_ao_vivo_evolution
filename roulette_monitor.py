@@ -11,22 +11,23 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from datetime import date # Importa a biblioteca de data
+from datetime import date
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_ID = os.environ.get('CHAT_ID')
 PADROES_USER = os.environ.get('PADROES_USER')
 PADROES_PASS = os.environ.get('PADROES_PASS')
-URL_APOSTA = os.environ.get('URL_APOSTA', 'https://bateu.bet.br/games/evolution/roleta-ao-vivo')
+URL_APOSTA = os.environ.get('URL_APOSTA')
 
-if not all([TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS]):
-    logging.critical("As variáveis de ambiente (TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS) devem ser definidas!")
+if not all([TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS, URL_APOSTA]):
+    logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS, URL_APOSTA) devem ser definidas!")
     exit()
 
 URL_ROLETA = 'https://jv.padroesdecassino.com.br/sistema/roletabrasileira'
 URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
-INTERVALO_VERIFICACAO = 10
+# OTIMIZAÇÃO: Verificação mais rápida para alertas ágeis
+INTERVALO_VERIFICACAO = 3
 
 # --- LÓGICA DA ESTRATÉGIA ---
 ROULETTE_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26]
@@ -38,24 +39,17 @@ def get_winning_numbers(trigger_number):
     try:
         index = ROULETTE_WHEEL.index(trigger_number)
         total_numbers = len(ROULETTE_WHEEL)
-        
-        # Começa com o número gatilho
         winners = {trigger_number}
-        
         # Adiciona 4 vizinhos à esquerda
         for i in range(1, 5):
             winners.add(ROULETTE_WHEEL[(index - i + total_numbers) % total_numbers])
-        
         # Adiciona 4 vizinhos à direita
         for i in range(1, 5):
             winners.add(ROULETTE_WHEEL[(index + i) % total_numbers])
-            
         # Adiciona sempre o número 0 à aposta
         winners.add(0)
-
         return list(winners)
     except ValueError:
-        # Caso o gatilho não seja encontrado na roleta (improvável)
         return [0, trigger_number]
 
 ESTRATEGIAS = {
@@ -126,32 +120,37 @@ def fazer_login(driver):
         return False
 
 def buscar_ultimo_numero(driver):
-    """Busca o número mais recente da roleta."""
+    """Busca o número mais recente da roleta de forma otimizada, sem recarregar a página."""
     global ultimo_numero_encontrado
     try:
-        if "roletabrasileira" not in driver.current_url:
-            logging.info("Não estamos na página da roleta, navegando...")
-            driver.get(URL_ROLETA)
-        else:
-            driver.refresh()
-        wait = WebDriverWait(driver, 30)
+        # OTIMIZAÇÃO: Não recarregamos mais a página, apenas verificamos o conteúdo atual.
+        # Isso é muito mais rápido e eficiente.
+        
+        # Usamos um tempo de espera curto, pois o elemento já deve estar na página.
+        wait = WebDriverWait(driver, 10)
+        
         container_recente = wait.until(EC.presence_of_element_located((By.ID, "dados")))
-        ultimo_numero_div = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#dados > div:last-child")))
+        
+        # Re-buscamos o último elemento para pegar a versão mais atualizada do DOM
+        ultimo_numero_div = container_recente.find_element(By.CSS_SELECTOR, "div:last-child")
+        
         numero_str = ultimo_numero_div.text.strip()
         
         if numero_str == ultimo_numero_encontrado:
-            return None
+            return None # Nenhum número novo desde a última verificação.
+
         ultimo_numero_encontrado = numero_str
         
         if numero_str.isdigit():
             numero = int(numero_str)
-            logging.info(f"Número válido encontrado: {numero}")
+            logging.info(f"✅ Novo número encontrado: {numero}")
             return numero
         else:
             logging.warning(f"Texto encontrado não é um número válido: '{numero_str}'")
             return None
+
     except Exception as e:
-        logging.error(f"Erro ao buscar número com Selenium: {e}")
+        logging.warning(f"Não foi possível buscar o último número. A página pode estar carregando. Erro: {e}")
         return None
 
 async def enviar_alerta(bot, mensagem):
@@ -270,6 +269,4 @@ if __name__ == '__main__':
         except Exception as e:
             logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
             time.sleep(60)
-
-
 
