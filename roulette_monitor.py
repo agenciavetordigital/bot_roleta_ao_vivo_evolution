@@ -26,7 +26,7 @@ if not all([TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS]):
 
 URL_ROLETA = 'https://jv.padroesdecassino.com.br/sistema/roletabrasileira'
 URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
-INTERVALO_VERIFICACAO = 10
+INTERVALO_VERIFICACAO = 05
 
 # --- ESTRATÉGIAS DE ALERTA ---
 ESTRATEGIAS = {
@@ -191,4 +191,5 @@ if __name__ == '__main__':
         except Exception as e:
             logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
             time.sleep(60)
+
 
