@@ -34,9 +34,11 @@ URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
 INTERVALO_VERIFICACAO = 3
 HISTORICO_FILE = 'historico.json'
 
-# --- CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
+# --- NOVO: CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
+# O bot irá trabalhar por um tempo entre 3 e 5 horas
 MIN_EXECUCAO_HORAS = 3
 MAX_EXECUCAO_HORAS = 5
+# E fará uma pausa por um tempo entre 10 e 20 minutos
 MIN_PAUSA_MINUTOS = 10
 MAX_PAUSA_MINUTOS = 20
 
