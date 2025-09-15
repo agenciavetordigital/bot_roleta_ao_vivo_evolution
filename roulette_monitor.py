@@ -36,9 +36,9 @@ HISTORICO_FILE = 'historico.json'
 
 # --- CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
 MIN_EXECUCAO_HORAS = 3
-MAX_EXECUCAO_HORAS = 6
-MIN_PAUSA_MINUTOS = 25
-MAX_PAUSA_MINUTOS = 45
+MAX_EXECUCAO_HORAS = 5
+MIN_PAUSA_MINUTOS = 10
+MAX_PAUSA_MINUTOS = 20
 
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
@@ -304,7 +304,7 @@ async def monitor_loop(bot):
         finally:
             if driver:
                 driver.quit()
-
+        
         # --- FASE DE PAUSA ---
         tempo_pausa_minutos = random.randint(MIN_PAUSA_MINUTOS, MAX_PAUSA_MINUTOS)
         tempo_pausa_segundos = tempo_pausa_minutos * 60
