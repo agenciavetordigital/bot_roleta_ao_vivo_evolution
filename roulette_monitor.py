@@ -26,7 +26,6 @@ if not all([TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS, URL_APOSTA]):
 
 URL_ROLETA = 'https://jv.padroesdecassino.com.br/sistema/roletabrasileira'
 URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
-# OTIMIZAÇÃO: Verificação mais rápida para alertas ágeis
 INTERVALO_VERIFICACAO = 3
 
 # --- LÓGICA DA ESTRATÉGIA ---
@@ -40,13 +39,10 @@ def get_winning_numbers(trigger_number):
         index = ROULETTE_WHEEL.index(trigger_number)
         total_numbers = len(ROULETTE_WHEEL)
         winners = {trigger_number}
-        # Adiciona 4 vizinhos à esquerda
         for i in range(1, 5):
             winners.add(ROULETTE_WHEEL[(index - i + total_numbers) % total_numbers])
-        # Adiciona 4 vizinhos à direita
         for i in range(1, 5):
             winners.add(ROULETTE_WHEEL[(index + i) % total_numbers])
-        # Adiciona sempre o número 0 à aposta
         winners.add(0)
         return list(winners)
     except ValueError:
@@ -71,7 +67,8 @@ active_strategy_state = {
     "strategy_name": "",
     "martingale_level": 0,
     "winning_numbers": [],
-    "trigger_number": None
+    "trigger_number": None,
+    "message_ids": [] # NOVO: Para guardar os IDs das mensagens a apagar
 }
 
 def configurar_driver():
@@ -112,32 +109,19 @@ def fazer_login(driver):
         return True
     except Exception as e:
         logging.error(f"Falha no processo de login: {e}")
-        try:
-            logging.error(f"URL atual no momento da falha: {driver.current_url}")
-            logging.error(f"HTML da página no momento do erro: {driver.page_source[:2000]}")
-        except Exception as debug_e:
-            logging.error(f"Erro adicional ao tentar obter informações de depuração: {debug_e}")
         return False
 
 def buscar_ultimo_numero(driver):
-    """Busca o número mais recente da roleta de forma otimizada, sem recarregar a página."""
+    """Busca o número mais recente da roleta de forma otimizada."""
     global ultimo_numero_encontrado
     try:
-        # OTIMIZAÇÃO: Não recarregamos mais a página, apenas verificamos o conteúdo atual.
-        # Isso é muito mais rápido e eficiente.
-        
-        # Usamos um tempo de espera curto, pois o elemento já deve estar na página.
         wait = WebDriverWait(driver, 10)
-        
         container_recente = wait.until(EC.presence_of_element_located((By.ID, "dados")))
-        
-        # Re-buscamos o último elemento para pegar a versão mais atualizada do DOM
         ultimo_numero_div = container_recente.find_element(By.CSS_SELECTOR, "div:last-child")
-        
         numero_str = ultimo_numero_div.text.strip()
         
         if numero_str == ultimo_numero_encontrado:
-            return None # Nenhum número novo desde a última verificação.
+            return None 
 
         ultimo_numero_encontrado = numero_str
         
@@ -148,18 +132,30 @@ def buscar_ultimo_numero(driver):
         else:
             logging.warning(f"Texto encontrado não é um número válido: '{numero_str}'")
             return None
-
-    except Exception as e:
-        logging.warning(f"Não foi possível buscar o último número. A página pode estar carregando. Erro: {e}")
+    except Exception:
+        logging.warning("Não foi possível buscar o último número. A página pode estar carregando.")
         return None
 
-async def enviar_alerta(bot, mensagem):
-    """Envia uma mensagem para o Telegram."""
+async def enviar_e_registrar_alerta(bot, mensagem):
+    """Envia uma mensagem e guarda o seu ID."""
+    global active_strategy_state
     try:
-        await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
-        logging.info("Alerta enviado com sucesso!")
+        sent_message = await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
+        active_strategy_state["message_ids"].append(sent_message.message_id)
+        logging.info("Alerta enviado e ID registrado com sucesso!")
     except Exception as e:
         logging.error(f"Erro ao enviar mensagem para o Telegram: {e}")
+
+async def apagar_mensagens_anteriores(bot):
+    """Apaga todas as mensagens guardadas na memória da estratégia."""
+    global active_strategy_state
+    logging.info(f"Apagando {len(active_strategy_state['message_ids'])} mensagens anteriores...")
+    for msg_id in active_strategy_state["message_ids"]:
+        try:
+            await bot.delete_message(chat_id=CHAT_ID, message_id=msg_id)
+        except Exception as e:
+            logging.warning(f"Não foi possível apagar a mensagem {msg_id}. Pode já ter sido apagada. Erro: {e}")
+    active_strategy_state["message_ids"] = []
 
 async def check_and_reset_daily_score(bot):
     """Verifica se o dia mudou e reseta o placar se necessário."""
@@ -170,10 +166,10 @@ async def check_and_reset_daily_score(bot):
         
         yesterday_score_msg = (f"Resumo do dia {daily_score['last_check_date'].strftime('%d/%m/%Y')}:\n"
                                f"Placar Final: ✅ {daily_score['wins']} x ❌ {daily_score['losses']}")
-        await enviar_alerta(bot, yesterday_score_msg)
+        await bot.send_message(chat_id=CHAT_ID, text=yesterday_score_msg) # Envia sem registrar para não ser apagada
 
         daily_score = {"wins": 0, "losses": 0, "last_check_date": today}
-        await enviar_alerta(bot, "Placar diário zerado. Bom dia e boas apostas!")
+        await bot.send_message(chat_id=CHAT_ID, text="Placar diário zerado. Bom dia e boas apostas!")
 
 async def processar_numero(bot, numero):
     """Verifica o número, gerencia o estado da estratégia e envia alertas."""
@@ -188,12 +184,14 @@ async def processar_numero(bot, numero):
     if active_strategy_state["active"]:
         is_win = numero in active_strategy_state["winning_numbers"]
         
+        await apagar_mensagens_anteriores(bot) # Limpa o chat antes de enviar o resultado
+
         if is_win:
             daily_score["wins"] += 1
             placar_final = f"Placar do Dia: ✅ {daily_score['wins']} x ❌ {daily_score['losses']}"
             mensagem = f"✅ Paga Roleta ✅\n\nGatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final}"
-            await enviar_alerta(bot, mensagem)
-            active_strategy_state = {"active": False}
+            await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
+            active_strategy_state = {"active": False, "message_ids": []}
         else:
             active_strategy_state["martingale_level"] += 1
             level = active_strategy_state["martingale_level"]
@@ -202,22 +200,23 @@ async def processar_numero(bot, numero):
                 mensagem = (f"❌ Roleta Safada ❌\n\n"
                             f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
                             f"Entrar no *{level}º Martingale*\n\n{placar_atual}")
-                await enviar_alerta(bot, mensagem)
+                await enviar_e_registrar_alerta(bot, mensagem) # Re-envia e guarda o ID
             else:
                 daily_score["losses"] += 1
                 placar_final = f"Placar do Dia: ✅ {daily_score['wins']} x ❌ {daily_score['losses']}"
                 mensagem = (f"❌ Roleta Safada ❌\n\n"
                             f"Loss final no 2º Martingale.\n"
                             f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final}")
-                await enviar_alerta(bot, mensagem)
-                active_strategy_state = {"active": False}
+                await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
+                active_strategy_state = {"active": False, "message_ids": []}
     else:
         for name, triggers in ESTRATEGIAS.items():
             if numero in triggers:
                 winning_numbers = get_winning_numbers(numero)
                 active_strategy_state = {
                     "active": True, "strategy_name": name, "martingale_level": 0,
-                    "winning_numbers": winning_numbers, "trigger_number": numero
+                    "winning_numbers": winning_numbers, "trigger_number": numero,
+                    "message_ids": [] # Zera a lista de mensagens
                 }
                 mensagem = (f"🎯 Gatilho Encontrado! 🎯\n\n"
                             f"Estratégia: *{name}*\n"
@@ -225,7 +224,7 @@ async def processar_numero(bot, numero):
                             f"Apostar em: `{', '.join(map(str, sorted(winning_numbers)))}`\n\n"
                             f"{placar_atual}\n\n"
                             f"[Fazer Aposta]({URL_APOSTA})")
-                await enviar_alerta(bot, mensagem)
+                await enviar_e_registrar_alerta(bot, mensagem)
                 break
 
 async def main():
@@ -235,7 +234,7 @@ async def main():
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' (Padrões de Cassino) inicializado com sucesso!")
-        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (Padrões de Cassino) conectado e monitorando!")
+        await bot.send_message(chat_id=CHAT_ID, text=f"✅ Bot '{info_bot.first_name}' (Padrões de Cassino) conectado e monitorando!")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
@@ -254,7 +253,7 @@ async def main():
     except Exception as e:
         logging.error(f"Um erro crítico ocorreu: {e}")
         if bot:
-            await enviar_alerta(bot, f"❌ Ocorreu um erro crítico no bot: {str(e)}")
+            await bot.send_message(chat_id=CHAT_ID, text=f"❌ Ocorreu um erro crítico no bot: {str(e)}")
     finally:
         if driver:
             driver.quit()
@@ -269,7 +268,4 @@ if __name__ == '__main__':
         except Exception as e:
             logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
             time.sleep(60)
-
-
-
 
