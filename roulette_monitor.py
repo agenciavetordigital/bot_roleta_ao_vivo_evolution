@@ -21,7 +21,7 @@ PADROES_PASS = os.environ.get('PADROES_PASS')
 URL_APOSTA = os.environ.get('URL_APOSTA')
 
 if not all([TOKEN_BOT, CHAT_IDS_STR, PADROES_USER, PADROES_PASS, URL_APOSTA]):
-    logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS, URL_APOSTA) devem ser definidas!")
+    logging.critical("Todas as variáveis de ambiente devem ser definidas!")
     exit()
 
 CHAT_IDS = [chat_id.strip() for chat_id in CHAT_IDS_STR.split(',')]
@@ -79,39 +79,34 @@ active_strategy_state = {
     "winning_numbers": [], "trigger_number": None, "messages": {}
 }
 
-# --- Health check variables ---
+# --- Controle de saúde ---
 last_health_check_date = None
 sent_good_night = False
+sent_summary_today = False
+all_messages_today = {chat_id: [] for chat_id in CHAT_IDS}
 
 def configurar_driver():
-    logging.info("Configurando o driver do Chrome...")
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    chrome_options.add_argument("user-agent=Mozilla/5.0")
     service = ChromeService() 
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    logging.info("Driver do Chrome configurado com sucesso.")
     return driver
 
 def fazer_login(driver):
     try:
-        logging.info("Iniciando processo de login no Padrões de Cassino...")
         driver.get(URL_LOGIN)
         wait = WebDriverWait(driver, 20)
         email_input = wait.until(EC.presence_of_element_located((By.ID, "loginclienteform-email")))
         email_input.send_keys(PADROES_USER)
         password_input = driver.find_element(By.ID, "senha")
         password_input.send_keys(PADROES_PASS)
-        login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-        login_button.click()
+        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
         wait.until(EC.url_to_be(URL_ROLETA))
-        logging.info("Login realizado com sucesso! Redirecionado para a página da roleta.")
         return True
-    except Exception as e:
-        logging.error(f"Falha no processo de login: {e}")
+    except:
         return False
 
 def buscar_ultimo_numero(driver):
@@ -126,12 +121,9 @@ def buscar_ultimo_numero(driver):
         numero_anterior = int(ultimo_numero_processado) if ultimo_numero_processado and ultimo_numero_processado.isdigit() else None
         ultimo_numero_processado = numero_str
         if numero_str.isdigit():
-            numero = int(numero_str)
-            logging.info(f"✅ Novo número encontrado: {numero} (Anterior: {numero_anterior})")
-            return numero
+            return int(numero_str)
         return None
-    except Exception:
-        logging.warning("Não foi possível buscar o último número. A página pode estar carregando.")
+    except:
         return None
 
 def format_score_message():
@@ -139,7 +131,7 @@ def format_score_message():
     for name, score in daily_score.items():
         if name != "last_check_date":
             wins_str = f"SG: {score['wins_sg']} | G1: {score['wins_g1']} | G2: {score['wins_g2']}"
-            messages.append(f"*{name}*:\n`    `✅ `{wins_str}`\n`    `❌ `{score['losses']}`")
+            messages.append(f"*{name}*:\n✅ {wins_str}\n❌ {score['losses']}")
     return "\n\n".join(messages)
 
 async def send_message_to_all(bot, text, **kwargs):
@@ -148,23 +140,44 @@ async def send_message_to_all(bot, text, **kwargs):
         try:
             message = await bot.send_message(chat_id=chat_id, text=text, **kwargs)
             sent_messages[chat_id] = message
+            all_messages_today[chat_id].append(message.message_id)
         except Exception as e:
-            logging.error(f"Erro ao enviar mensagem para o chat_id {chat_id}: {e}")
+            logging.error(f"Erro ao enviar mensagem para {chat_id}: {e}")
     return sent_messages
 
-# --- Health check (Bom dia / Boa noite) ---
+async def delete_all_messages_today(bot):
+    for chat_id, messages in all_messages_today.items():
+        for msg_id in messages:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except:
+                pass
+        all_messages_today[chat_id] = []
+
+# --- Health check (Bom dia / Boa noite / Resumo Final) ---
 async def check_bot_health(bot):
-    global last_health_check_date, sent_good_night
+    global last_health_check_date, sent_good_night, sent_summary_today, daily_score
     now = datetime.now()
     today = now.date()
 
-    # Bom dia (apenas 1x por dia, ao virar a data)
+    # Bom dia (reset + mensagem)
     if last_health_check_date != today:
         last_health_check_date = today
-        sent_good_night = False  # reseta para o novo dia
+        sent_good_night = False
+        sent_summary_today = False
         await send_message_to_all(bot, "🌞 Bom dia! Estou online e a postos.")
+        daily_score = initialize_score()
+        await delete_all_messages_today(bot)
 
-    # Boa noite (apenas 1x por dia, após 20h)
+    # Resumo final às 23h59
+    if now.hour == 23 and now.minute == 59 and not sent_summary_today:
+        sent_summary_today = True
+        final_scores = format_score_message().replace("*Placar do Dia*", "*Placar Final*")
+        await send_message_to_all(bot, f"📑 Resumo Final do dia {today.strftime('%d/%m/%Y')}:\n\n{final_scores}",
+                                  parse_mode=ParseMode.MARKDOWN)
+        await delete_all_messages_today(bot)
+
+    # Boa noite
     if now.hour >= 20 and not sent_good_night:
         sent_good_night = True
         await send_message_to_all(bot, "🌙 Boa noite! Continuo online e monitorando.")
@@ -175,7 +188,6 @@ async def processar_numero(bot, numero):
     if numero is None: 
         return
 
-    # checar reset diário e mensagens de saúde
     await check_bot_health(bot)
 
     placar_formatado = format_score_message()
@@ -235,36 +247,27 @@ async def main():
     bot = None
     try:
         bot = telegram.Bot(token=TOKEN_BOT)
-        info_bot = await bot.get_me()
-        logging.info(f"Bot '{info_bot.first_name}' (Padrões de Cassino) inicializado com sucesso!")
-
-        # Notificação de reinicialização
-        await send_message_to_all(bot, "⚠️ Atenção: Tive um problema e fui reiniciado, mas já estou de volta ao trabalho.")
-
-    except Exception as e:
-        logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
+        await send_message_to_all(bot, "⚠️ Atenção: Fui reiniciado, mas já estou de volta ao trabalho.")
+    except:
         return
     driver = None
     try:
         driver = configurar_driver()
         if not fazer_login(driver): 
-            raise Exception("O login no Padrões de Cassino falhou.")
+            raise Exception("O login falhou.")
         while True:
             numero = buscar_ultimo_numero(driver)
             await processar_numero(bot, numero)
             await asyncio.sleep(INTERVALO_VERIFICACAO)
     except Exception as e:
-        logging.error(f"Um erro crítico ocorreu: {e}")
+        logging.error(f"Erro crítico: {e}")
     finally:
         if driver: driver.quit()
-        logging.info("Driver do Selenium encerrado.")
-        logging.info("O programa principal foi encerrado. Reiniciando em 1 minuto.")
         await asyncio.sleep(60)
 
 if __name__ == '__main__':
     while True:
         try:
             asyncio.run(main())
-        except Exception as e:
-            logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
+        except:
             time.sleep(60)
