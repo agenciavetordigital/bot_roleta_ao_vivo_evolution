@@ -62,12 +62,10 @@ def fazer_login(driver):
         driver.get(URL_LOGIN)
         wait = WebDriverWait(driver, 20)
 
-        # SELETORES CORRIGIDOS
         email_input = wait.until(EC.presence_of_element_located((By.ID, "loginclienteform-email")))
         email_input.send_keys(PADROES_USER)
         logging.info("E-mail preenchido.")
 
-        # SELETORES CORRIGIDOS
         password_input = driver.find_element(By.ID, "senha")
         password_input.send_keys(PADROES_PASS)
         logging.info("Senha preenchida.")
@@ -76,14 +74,12 @@ def fazer_login(driver):
         login_button.click()
         logging.info("Botão de login clicado.")
         
-        # Espera que a URL mude para algo que NÃO seja a página de login
         wait.until(EC.url_contains("sistema"))
         logging.info("Login realizado com sucesso! Redirecionado da página de login.")
         return True
 
     except Exception as e:
         logging.error(f"Falha no processo de login: {e}")
-        # PASSO DE DIAGNÓSTICO AVANÇADO
         try:
             logging.error(f"URL atual no momento do erro: {driver.current_url}")
             logging.error(f"HTML da página no momento do erro: {driver.page_source[:2000]}")
@@ -97,14 +93,17 @@ def buscar_ultimo_numero(driver):
     try:
         if driver.current_url != URL_ROLETA:
             driver.get(URL_ROLETA)
+        else:
+            # Se já estamos na página, apenas atualizamos para pegar novos dados
+            driver.refresh()
 
         wait = WebDriverWait(driver, 30)
         
-        container_principal = wait.until(
-             EC.presence_of_element_located((By.ID, "dados"))
+        # MUDANÇA ESTRATÉGICA: Espera diretamente pelo primeiro número a aparecer
+        primeiro_numero_element = wait.until(
+             EC.presence_of_element_located((By.CSS_SELECTOR, "#dados > div"))
         )
         
-        primeiro_numero_element = container_principal.find_element(By.TAG_NAME, "div")
         numero_str = primeiro_numero_element.text.strip()
         
         if numero_str == ultimo_numero_encontrado:
