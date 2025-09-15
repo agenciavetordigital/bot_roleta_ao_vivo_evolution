@@ -15,14 +15,18 @@ from datetime import date
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
-CHAT_ID = os.environ.get('CHAT_ID')
+# AGORA SUPORTA MÚLTIPLOS IDs, SEPARADOS POR VÍRGULA
+CHAT_IDS_STR = os.environ.get('CHAT_ID')
 PADROES_USER = os.environ.get('PADROES_USER')
 PADROES_PASS = os.environ.get('PADROES_PASS')
 URL_APOSTA = os.environ.get('URL_APOSTA')
 
-if not all([TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS, URL_APOSTA]):
+if not all([TOKEN_BOT, CHAT_IDS_STR, PADROES_USER, PADROES_PASS, URL_APOSTA]):
     logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS, URL_APOSTA) devem ser definidas!")
     exit()
+
+# Transforma a string de IDs em uma lista de IDs
+CHAT_IDS = [chat_id.strip() for chat_id in CHAT_IDS_STR.split(',')]
 
 URL_ROLETA = 'https://jv.padroesdecassino.com.br/sistema/roletabrasileira'
 URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
@@ -56,7 +60,7 @@ def get_winners_p2(trigger_number):
 
 ESTRATEGIAS = {
     "Estratégia do 72": {
-        "triggers": [2, 12, 17, 16], # Números removidos conforme solicitado
+        "triggers": [2, 12, 17, 16],
         "filter": [],
         "get_winners": get_winners_72
     },
@@ -87,8 +91,7 @@ active_strategy_state = {
     "martingale_level": 0,
     "winning_numbers": [],
     "trigger_number": None,
-    "trigger_message_id": None,
-    "martingale_message_ids": []
+    "messages": {} # Armazena os IDs das mensagens por chat_id. Ex: { "123": {"trigger": 987, "martingales": [988]} }
 }
 
 def configurar_driver():
@@ -157,27 +160,52 @@ def format_score_message():
             messages.append(f"*{name}*: ✅ {score['wins']} x ❌ {score['losses']}")
     return "\n".join(messages)
 
-async def apagar_mensagens_da_jogada(bot):
-    """Apaga a mensagem de gatilho e as de martingale."""
-    global active_strategy_state
-    messages_to_delete = active_strategy_state.get("martingale_message_ids", [])
-    if active_strategy_state.get("trigger_message_id"):
-        messages_to_delete.append(active_strategy_state["trigger_message_id"])
-    for msg_id in messages_to_delete:
+async def send_message_to_all(bot, text, **kwargs):
+    """Envia uma mensagem para todos os CHAT_IDs e retorna os objetos da mensagem."""
+    sent_messages = {}
+    for chat_id in CHAT_IDS:
         try:
-            await bot.delete_message(chat_id=CHAT_ID, message_id=msg_id)
+            message = await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+            sent_messages[chat_id] = message
         except Exception as e:
-            logging.warning(f"Não foi possível apagar a mensagem {msg_id}. Erro: {e}")
+            logging.error(f"Erro ao enviar mensagem para o chat_id {chat_id}: {e}")
+    return sent_messages
+
+async def delete_messages_from_all(bot, message_dict):
+    """Apaga um dicionário de mensagens, onde a chave é o chat_id."""
+    for chat_id, messages in message_dict.items():
+        for message_id in messages:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception as e:
+                logging.warning(f"Não foi possível apagar a mensagem {message_id} do chat {chat_id}. Erro: {e}")
+
+async def apagar_mensagens_da_jogada(bot):
+    """Apaga a mensagem de gatilho e as de martingale de todos os chats."""
+    global active_strategy_state
+    all_messages_to_delete = {}
+    for chat_id in CHAT_IDS:
+        messages_for_chat = []
+        if chat_id in active_strategy_state["messages"]:
+            if "trigger" in active_strategy_state["messages"][chat_id]:
+                messages_for_chat.append(active_strategy_state["messages"][chat_id]["trigger"])
+            messages_for_chat.extend(active_strategy_state["messages"][chat_id].get("martingales", []))
+        
+        if messages_for_chat:
+            all_messages_to_delete[chat_id] = messages_for_chat
+            
+    await delete_messages_from_all(bot, all_messages_to_delete)
 
 async def apagar_mensagens_de_martingale(bot):
-    """Apaga apenas as mensagens de martingale."""
+    """Apaga apenas as mensagens de martingale de todos os chats."""
     global active_strategy_state
-    for msg_id in active_strategy_state["martingale_message_ids"]:
-        try:
-            await bot.delete_message(chat_id=CHAT_ID, message_id=msg_id)
-        except Exception as e:
-            logging.warning(f"Não foi possível apagar a mensagem {msg_id}. Erro: {e}")
-    active_strategy_state["martingale_message_ids"] = []
+    martingale_messages_to_delete = {}
+    for chat_id in CHAT_IDS:
+        if chat_id in active_strategy_state["messages"] and "martingales" in active_strategy_state["messages"][chat_id]:
+            martingale_messages_to_delete[chat_id] = active_strategy_state["messages"][chat_id]["martingales"]
+            active_strategy_state["messages"][chat_id]["martingales"] = [] # Limpa a lista após o agendamento para exclusão
+
+    await delete_messages_from_all(bot, martingale_messages_to_delete)
 
 async def check_and_reset_daily_score(bot):
     """Verifica se o dia mudou e reseta o placar se necessário."""
@@ -189,10 +217,10 @@ async def check_and_reset_daily_score(bot):
         summary_title = f"Resumo do dia {daily_score['last_check_date'].strftime('%d/%m/%Y')}:"
         final_scores = format_score_message().replace("*Placar do Dia:*", "*Placar Final:*")
         
-        await bot.send_message(chat_id=CHAT_ID, text=f"{summary_title}\n{final_scores}", parse_mode=ParseMode.MARKDOWN)
+        await send_message_to_all(bot, f"{summary_title}\n{final_scores}", parse_mode=ParseMode.MARKDOWN)
 
         daily_score = initialize_score()
-        await bot.send_message(chat_id=CHAT_ID, text="Placar diário zerado. Bom dia e boas apostas!")
+        await send_message_to_all(bot, "Placar diário zerado. Bom dia e boas apostas!")
 
 async def processar_numero(bot, numero):
     """Verifica o número, gerencia o estado da estratégia e envia alertas."""
@@ -214,8 +242,8 @@ async def processar_numero(bot, numero):
             daily_score[strategy_name]["wins"] += 1
             placar_final_formatado = format_score_message()
             mensagem = f"✅ Paga Roleta ✅\n\n*Estratégia: {strategy_name}*\nGatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final_formatado}"
-            await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
-            active_strategy_state = {"active": False, "trigger_message_id": None, "martingale_message_ids": []}
+            await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
+            active_strategy_state = {"active": False, "messages": {}}
         else:
             await apagar_mensagens_de_martingale(bot)
             active_strategy_state["martingale_level"] += 1
@@ -225,8 +253,13 @@ async def processar_numero(bot, numero):
                 mensagem = (f"❌ Roleta Safada ❌\n\n*Estratégia: {strategy_name}*\n"
                             f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
                             f"Entrar no *{level}º Martingale*\n\n{placar_formatado}")
-                sent_message = await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
-                active_strategy_state["martingale_message_ids"].append(sent_message.message_id)
+                sent_messages = await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
+                for chat_id, message in sent_messages.items():
+                    if chat_id not in active_strategy_state["messages"]:
+                        active_strategy_state["messages"][chat_id] = {"martingales": []}
+                    if "martingales" not in active_strategy_state["messages"][chat_id]:
+                         active_strategy_state["messages"][chat_id]["martingales"] = []
+                    active_strategy_state["messages"][chat_id]["martingales"].append(message.message_id)
             else:
                 await apagar_mensagens_da_jogada(bot)
                 daily_score[strategy_name]["losses"] += 1
@@ -234,13 +267,12 @@ async def processar_numero(bot, numero):
                 mensagem = (f"❌ Roleta Safada ❌\n\n*Estratégia: {strategy_name}*\n"
                             f"Loss final no 2º Martingale.\n"
                             f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final_formatado}")
-                await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
-                active_strategy_state = {"active": False, "trigger_message_id": None, "martingale_message_ids": []}
+                await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
+                active_strategy_state = {"active": False, "messages": {}}
     # Se nenhuma estratégia está ativa, procura por um novo gatilho
     else:
         for name, details in ESTRATEGIAS.items():
             if numero in details["triggers"]:
-                # Verifica a filtragem avançada
                 if details["filter"] and numero_anterior in details["filter"]:
                     logging.info(f"Gatilho {numero} para '{name}' ignorado. Número anterior ({numero_anterior}) está no filtro.")
                     continue
@@ -252,15 +284,19 @@ async def processar_numero(bot, numero):
                             f"Apostar em: `{', '.join(map(str, sorted(winning_numbers)))}`\n\n"
                             f"{placar_formatado}\n\n"
                             f"[Fazer Aposta]({URL_APOSTA})")
-                sent_message = await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
+                sent_messages = await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
                 
                 active_strategy_state = {
                     "active": True, "strategy_name": name, "martingale_level": 0,
                     "winning_numbers": winning_numbers, "trigger_number": numero,
-                    "trigger_message_id": sent_message.message_id,
-                    "martingale_message_ids": []
+                    "messages": {}
                 }
-                break # Sai do loop para não ativar outra estratégia ao mesmo tempo
+                for chat_id, message in sent_messages.items():
+                    active_strategy_state["messages"][chat_id] = {
+                        "trigger": message.message_id,
+                        "martingales": []
+                    }
+                break 
 
 async def main():
     """Função principal."""
@@ -269,7 +305,7 @@ async def main():
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' (Padrões de Cassino) inicializado com sucesso!")
-        await bot.send_message(chat_id=CHAT_ID, text=f"✅ Bot '{info_bot.first_name}' (Padrões de Cassino) conectado e monitorando!")
+        await send_message_to_all(bot, f"✅ Bot '{info_bot.first_name}' (Padrões de Cassino) conectado e monitorando!")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
