@@ -26,7 +26,7 @@ if not all([TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS]):
 
 URL_ROLETA = 'https://jv.padroesdecassino.com.br/sistema/roletabrasileira'
 URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
-INTERVALO_VERIFICACAO = 09
+INTERVALO_VERIFICACAO = 10
 
 # --- LÓGICA DA ESTRATÉGIA ---
 ROULETTE_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26]
@@ -270,5 +270,6 @@ if __name__ == '__main__':
         except Exception as e:
             logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
             time.sleep(60)
+
 
 
