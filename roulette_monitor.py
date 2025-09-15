@@ -105,12 +105,12 @@ def buscar_ultimo_numero(driver):
              EC.presence_of_element_located((By.ID, "dados"))
         )
         
-        # Espera pelo primeiro 'div' (que é o último número) a aparecer dentro do container
-        primeiro_numero_div = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "#dados > div:first-child"))
+        # AJUSTE FINAL: Espera pelo ÚLTIMO 'div' dentro do container, que é o número mais recente.
+        ultimo_numero_div = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "#dados > div:last-child"))
         )
         
-        numero_str = primeiro_numero_div.text.strip()
+        numero_str = ultimo_numero_div.text.strip()
         
         if numero_str == ultimo_numero_encontrado:
             return None
