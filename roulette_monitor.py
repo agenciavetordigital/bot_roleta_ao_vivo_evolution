@@ -15,17 +15,18 @@ from selenium.webdriver.support import expected_conditions as EC
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_ID = os.environ.get('CHAT_ID')
-# VARIÁVEIS PARA O LOGIN NO PADRÕES DE CASSINO
 PADROES_USER = os.environ.get('PADROES_USER')
 PADROES_PASS = os.environ.get('PADROES_PASS')
+# NOVA VARIÁVEL PARA O LINK DE APOSTA
+URL_APOSTA = os.environ.get('URL_APOSTA', 'https://bateu.bet.br/games/evolution/roleta-ao-vivo') # Valor padrão caso não seja definida
 
 if not all([TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS]):
-    logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS) devem ser definidas!")
+    logging.critical("As variáveis de ambiente (TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS) devem ser definidas!")
     exit()
 
 URL_ROLETA = 'https://jv.padroesdecassino.com.br/sistema/roletabrasileira'
 URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
-INTERVALO_VERIFICACAO = 08
+INTERVALO_VERIFICACAO = 10
 
 # --- ESTRATÉGIAS DE ALERTA ---
 ESTRATEGIAS = {
@@ -49,7 +50,6 @@ def configurar_driver():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     
-    # Deixa o Selenium encontrar o driver instalado pelo Dockerfile
     service = ChromeService() 
     driver = webdriver.Chrome(service=service, options=chrome_options)
     logging.info("Driver do Chrome configurado com sucesso.")
@@ -91,7 +91,6 @@ def buscar_ultimo_numero(driver):
     """Busca o número mais recente da roleta."""
     global ultimo_numero_encontrado
     try:
-        # Garante que estamos na página correta
         if "roletabrasileira" not in driver.current_url:
             logging.info("Não estamos na página da roleta, navegando...")
             driver.get(URL_ROLETA)
@@ -100,12 +99,10 @@ def buscar_ultimo_numero(driver):
 
         wait = WebDriverWait(driver, 30)
         
-        # Espera pelo container de "Números Recentes" estar visível
         container_recente = wait.until(
              EC.presence_of_element_located((By.ID, "dados"))
         )
         
-        # AJUSTE FINAL: Espera pelo ÚLTIMO 'div' dentro do container, que é o número mais recente.
         ultimo_numero_div = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "#dados > div:last-child"))
         )
@@ -139,7 +136,7 @@ async def verificar_estrategias(bot, numero):
         return
     for nome_estrategia, condicao in ESTRATEGIAS.items():
         if condicao(numero):
-            mensagem = f"🎯 Gatilho Encontrado! 🎯\n\nEstratégia: *{nome_estrategia}*\nNúmero Sorteado: *{numero}*"
+            mensagem = f"🎯 Gatilho Encontrado! 🎯\n\nEstratégia: *{nome_estrategia}*\nNúmero Sorteado: *{numero}*\n\n[Fazer Aposta]({URL_APOSTA})"
             logging.info(f"Condição da estratégia '{nome_estrategia}' atendida. Enviando alerta...")
             await enviar_alerta(bot, mensagem)
 
@@ -194,6 +191,4 @@ if __name__ == '__main__':
         except Exception as e:
             logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
             time.sleep(60)
-
-
 
