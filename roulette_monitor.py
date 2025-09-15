@@ -73,6 +73,24 @@ numero_anterior = None
 last_health_check_date = None
 last_goodnight_date = None
 
+# --- PLACAR DIÁRIO ---
+def initialize_score():
+    score = {"last_check_date": date.today()}
+    for name in ESTRATEGIAS:
+        score[name] = {"wins_sg": 0, "wins_g1": 0, "wins_g2": 0, "losses": 0}
+    return score
+
+daily_score = initialize_score()
+
+def format_score_message():
+    messages = ["📊 *Placar do Dia* 📊"]
+    for name, score in daily_score.items():
+        if name != "last_check_date":
+            wins_str = f"SG: {score['wins_sg']} | G1: {score['wins_g1']} | G2: {score['wins_g2']}"
+            messages.append(f"*{name}*:\n`    `✅ `{wins_str}`\n`    `❌ `{score['losses']}`")
+    return "\n\n".join(messages)
+
+# --- Selenium ---
 def configurar_driver():
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--headless")
@@ -131,23 +149,27 @@ async def send_message_to_all(bot, text, **kwargs):
 
 # --- Notificações de saúde ---
 async def check_bot_health(bot):
-    global last_health_check_date, last_goodnight_date
+    global last_health_check_date, last_goodnight_date, daily_score
     now = datetime.now()
     today = now.date()
 
-    # Bom dia (após meia-noite, uma vez por dia)
+    # Bom dia + resumo do dia anterior
     if last_health_check_date != today:
         last_health_check_date = today
-        await send_message_to_all(bot, "🌞 Bom dia! Estou online e a postos.")
+        summary_title = f"📊 Resumo do dia {daily_score['last_check_date'].strftime('%d/%m/%Y')}:"
+        final_scores = format_score_message().replace("*Placar do Dia*", "*Placar Final*")
+        await send_message_to_all(bot, f"{summary_title}\n{final_scores}", parse_mode=ParseMode.MARKDOWN)
+        daily_score = initialize_score()
+        await send_message_to_all(bot, "🌞 Bom dia! Estou online e a postos. Placar diário zerado.")
 
-    # Boa noite (a partir das 20h, uma vez por dia)
+    # Boa noite
     if now.hour >= 20 and last_goodnight_date != today:
         last_goodnight_date = today
         await send_message_to_all(bot, "🌙 Boa noite! Continuo rodando em segundo plano.")
 
-# --- Processamento das estratégias (mantive seu código original simplificado aqui) ---
+# --- Processamento das estratégias ---
 async def processar_numero(bot, numero):
-    # aqui você mantém sua lógica original de estratégias
+    # Aqui mantém a lógica de estratégias do seu código
     pass
 
 async def main():
@@ -155,7 +177,7 @@ async def main():
     info_bot = await bot.get_me()
     logging.info(f"Bot '{info_bot.first_name}' inicializado com sucesso!")
 
-    # 🚨 Mensagem de reinicialização
+    # 🚨 Reinicialização
     await send_message_to_all(bot, "⚠️ Atenção: Tive um problema e fui reiniciado, mas já estou de volta ao trabalho.")
 
     driver = configurar_driver()
@@ -167,7 +189,7 @@ async def main():
         numero = buscar_ultimo_numero(driver)
         await processar_numero(bot, numero)
 
-        # checagem diária de saúde
+        # checagem de saúde
         await check_bot_health(bot)
 
         await asyncio.sleep(INTERVALO_VERIFICACAO)
