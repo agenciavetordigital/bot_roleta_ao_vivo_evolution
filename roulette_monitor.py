@@ -102,6 +102,22 @@ def initialize_score():
 daily_score = initialize_score()
 active_strategy_state = {"active": False, "messages": {}}
 
+# --- NOTIFICAÇÕES DE SAÚDE ---
+last_good_morning = None
+last_good_night = None
+
+async def check_health_messages(bot):
+    global last_good_morning, last_good_night
+    now = datetime.now()
+
+    if now.hour < 12 and (last_good_morning is None or last_good_morning != date.today()):
+        await send_message_to_all(bot, "🌞 Bom dia! Estou online e a postos.")
+        last_good_morning = date.today()
+
+    if now.hour >= 20 and (last_good_night is None or last_good_night != date.today()):
+        await send_message_to_all(bot, "🌙 Boa noite! O bot segue em funcionamento.")
+        last_good_night = date.today()
+
 # --- SELENIUM ---
 def configurar_driver():
     logging.info("Configurando o driver do Chrome...")
@@ -109,10 +125,7 @@ def configurar_driver():
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    )
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
     service = ChromeService()
     driver = webdriver.Chrome(service=service, options=chrome_options)
     logging.info("Driver do Chrome configurado com sucesso.")
@@ -181,22 +194,6 @@ async def send_message_to_all(bot, text, **kwargs):
         except Exception as e:
             logging.error(f"Erro ao enviar mensagem para o chat_id {chat_id}: {e}")
 
-# --- NOTIFICAÇÕES DE SAÚDE ---
-last_good_morning = None
-last_good_night = None
-
-async def check_health_messages(bot):
-    global last_good_morning, last_good_night
-    now = datetime.now()
-
-    if now.hour < 12 and (last_good_morning is None or last_good_morning != date.today()):
-        await send_message_to_all(bot, "🌞 Bom dia! Estou online e a postos.")
-        last_good_morning = date.today()
-
-    if now.hour >= 20 and (last_good_night is None or last_good_night != date.today()):
-        await send_message_to_all(bot, "🌙 Boa noite! Estou em funcionamento.")
-        last_good_night = date.today()
-
 # --- COMANDO /relatorio ---
 async def relatorio_command(update, context):
     try:
@@ -256,23 +253,24 @@ async def processar_numero(bot, numero):
     if numero is None:
         return
     await check_and_reset_daily_score(bot)
-    await check_health_messages(bot)  # <<< notificações de saúde
+    await check_health_messages(bot)
 
 # --- LOOP PRINCIPAL ---
 async def monitor_loop(bot):
-    driver = None
     while True:
         tempo_execucao_segundos = random.randint(MIN_EXECUCAO_HORAS * 3600,
                                                  MAX_EXECUCAO_HORAS * 3600)
         tempo_pausa_minutos = random.randint(MIN_PAUSA_MINUTOS, MAX_PAUSA_MINUTOS)
         tempo_pausa_segundos = tempo_pausa_minutos * 60
 
+        driver = None
         start_time = time.time()
         try:
             driver = configurar_driver()
             if not fazer_login(driver):
                 await send_message_to_all(bot, "❌ Falha crítica no login. Tentando novamente em 1 minuto.")
-                raise Exception("O login no Padrões de Cassino falhou.")
+                await asyncio.sleep(60)
+                continue  # volta ao início sem pausa longa
 
             await send_message_to_all(bot, "✅ Bot conectado e monitorando! ⚠️ Reinicialização detectada.")
 
@@ -287,12 +285,16 @@ async def monitor_loop(bot):
         except Exception as e:
             logging.error(f"Erro no loop de monitoramento: {e}")
             await send_message_to_all(bot, f"🚨 Erro crítico: {e}. Reiniciando em 1 minuto.")
+            await asyncio.sleep(60)
+
         finally:
             if driver:
                 driver.quit()
-            logging.info(f"Driver do Selenium encerrado. Pausa de {tempo_pausa_minutos} minutos.")
-            await asyncio.sleep(tempo_pausa_segundos)
-            await send_message_to_all(bot, "⚙️ Pausa concluída. Retomando monitoramento.")
+                logging.info("Driver do Selenium encerrado.")
+
+        # Só pausa após o ciclo
+        await asyncio.sleep(tempo_pausa_segundos)
+        await send_message_to_all(bot, "⚙️ Pausa concluída. Retomando monitoramento.")
 
 # --- MAIN ---
 async def main():
