@@ -34,11 +34,12 @@ URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
 INTERVALO_VERIFICACAO = 3
 HISTORICO_FILE = 'historico.json'
 
-# --- NOVO: CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
+# --- CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
 MIN_EXECUCAO_HORAS = 3
-MAX_EXECUCAO_HORAS = 6
-MIN_PAUSA_MINUTOS = 25
+MAX_EXECUCAO_HORAS = 5
+MIN_PAUSA_MINUTOS = 20
 MAX_PAUSA_MINUTOS = 45
+
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
 ROULETTE_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8,
@@ -62,8 +63,8 @@ def get_winners_p2(trigger_number):
             23, 24, 26, 27, 28, 30, 31, 32, 34, 35]
 
 ESTRATEGIAS = {
-    "Estratégia menos fichas": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
-    "Estratégia 95% - Roleta": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
+    "Especial menos ficha": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
+    "Padrão 95% arriscada": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
                                            25, 29, 33, 36, 26, 27, 28,
                                            30, 31, 32, 34, 35],
                                "filter": [], "get_winners": get_winners_p2}
@@ -167,40 +168,6 @@ async def send_message_to_all(bot, text, **kwargs):
         except Exception as e:
             logging.error(f"Erro ao enviar mensagem para o chat_id {chat_id}: {e}")
 
-# --- COMANDO /relatorio ---
-async def relatorio_command(update, context):
-    try:
-        args = context.args
-        if not args:
-            await update.message.reply_text("Por favor, especifique o dia. Ex: `/relatorio ontem` ou `/relatorio 2025-09-14`", parse_mode=ParseMode.MARKDOWN)
-            return
-            
-        target_day_str = args[0].lower()
-        history = load_history()
-        target_date = None
-
-        if target_day_str == "ontem":
-            target_date = (date.today() - timedelta(days=1)).isoformat()
-        else:
-            try:
-                datetime.strptime(target_day_str, '%Y-%m-%d')
-                target_date = target_day_str
-            except ValueError:
-                await update.message.reply_text("Formato de data inválido. Use AAAA-MM-DD.", parse_mode=ParseMode.MARKDOWN)
-                return
-
-        if target_date in history:
-            score_data = history[target_date]
-            report_title = f"📜 Relatório do dia {date.fromisoformat(target_date).strftime('%d/%m/%Y')}:"
-            report_message = format_score_message(score_data, title=report_title)
-            await update.message.reply_text(report_message, parse_mode=ParseMode.MARKDOWN)
-        else:
-            await update.message.reply_text(f"Nenhum dado encontrado para o dia {target_date}.", parse_mode=ParseMode.MARKDOWN)
-
-    except Exception as e:
-        logging.error(f"Erro no comando /relatorio: {e}")
-        await update.message.reply_text("⚠️ Ocorreu um erro ao processar o relatório.", parse_mode=ParseMode.MARKDOWN)
-
 # --- LÓGICA PRINCIPAL ---
 async def check_and_reset_daily_score(bot):
     global daily_score
@@ -276,42 +243,77 @@ async def processar_numero(bot, numero):
                                          "winning_numbers": winning_numbers, "trigger_number": numero, "messages": {}}
                 break 
 
+# --- COMANDOS DO TELEGRAM ---
+async def relatorio_command(update, context):
+    try:
+        args = context.args
+        if not args:
+            await update.message.reply_text("Por favor, especifique o dia. Ex: `/relatorio ontem` ou `/relatorio 2025-09-14`")
+            return
+            
+        target_day_str = args[0].lower()
+        history = load_history()
+        target_date = None
+
+        if target_day_str == "ontem":
+            target_date = (date.today() - timedelta(days=1)).isoformat()
+        else:
+            try:
+                datetime.strptime(target_day_str, '%Y-%m-%d')
+                target_date = target_day_str
+            except ValueError:
+                await update.message.reply_text("Formato de data inválido. Use AAAA-MM-DD.")
+                return
+
+        if target_date in history:
+            score_data = history[target_date]
+            report_title = f"📜 Relatório do dia {date.fromisoformat(target_date).strftime('%d/%m/%Y')}:"
+            report_message = format_score_message(score_data, title=report_title)
+            await update.message.reply_text(report_message, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await update.message.reply_text(f"Nenhum dado encontrado para o dia {target_date}.")
+
+    except Exception as e:
+        logging.error(f"Erro no comando /relatorio: {e}")
+        await update.message.reply_text("Ocorreu um erro ao processar o seu pedido.")
+
 # --- INICIALIZAÇÃO E LOOP DE MONITORAMENTO ---
 async def monitor_loop(bot):
-    driver = None
-    while True:
+    while True: # Loop externo que alterna entre trabalho e pausa
+        # --- FASE DE TRABALHO ---
         tempo_execucao_segundos = random.randint(MIN_EXECUCAO_HORAS * 3600, MAX_EXECUCAO_HORAS * 3600)
-        tempo_pausa_minutos = random.randint(MIN_PAUSA_MINUTOS, MAX_PAUSA_MINUTOS)
-        tempo_pausa_segundos = tempo_pausa_minutos * 60
-
         start_time = time.time()
+        driver = None
         try:
             driver = configurar_driver()
             if not fazer_login(driver):
-                await send_message_to_all(bot, "❌ Falha crítica no login. Tentando novamente em 1 minuto.")
-                raise Exception("O login falhou.")
+                await send_message_to_all(bot, "❌ Falha crítica no login. A tentar novamente em 1 minuto.")
+                await asyncio.sleep(60)
+                continue # Pula para a próxima iteração do loop, tentando o login novamente
 
-            await send_message_to_all(bot, f"✅ Bot conectado e monitorando!")
-
+            await send_message_to_all(bot, f"✅ Bot conectado e a monitorizar!")
+            
             while time.time() - start_time < tempo_execucao_segundos:
                 numero = buscar_ultimo_numero(driver)
                 await processar_numero(bot, numero)
                 await asyncio.sleep(INTERVALO_VERIFICACAO)
 
-            logging.info(f"Atingido o tempo de execução. Pausa de {tempo_pausa_minutos} minutos.")
-            await send_message_to_all(bot, f"⏳ Pausa para revisão. Retorno em ~{tempo_pausa_minutos} minutos.")
-
         except Exception as e:
-            logging.error(f"Erro crítico no loop: {e}")
-            await send_message_to_all(bot, f"🚨 Erro crítico: {e}. Reiniciando em 1 minuto.")
+            logging.error(f"Um erro crítico ocorreu durante o ciclo de trabalho: {e}")
+            await send_message_to_all(bot, f"🚨 Erro crítico: {e}. O bot irá fazer uma pausa e tentar novamente.")
         finally:
             if driver:
                 driver.quit()
-            logging.info(f"Driver encerrado. Pausa de {tempo_pausa_minutos} minutos.")
-            await asyncio.sleep(tempo_pausa_segundos)
-            await send_message_to_all(bot, "⚙️ Pausa concluída. Retomando monitoramento.")
+        
+        # --- FASE DE PAUSA ---
+        tempo_pausa_minutos = random.randint(MIN_PAUSA_MINUTOS, MAX_PAUSA_MINUTOS)
+        tempo_pausa_segundos = tempo_pausa_minutos * 60
+        logging.info(f"Ciclo de trabalho concluído. A iniciar pausa de {tempo_pausa_minutos} minutos.")
+        await send_message_to_all(bot, f"⏳ Pausa para revisão das estratégias. O bot voltará em aproximadamente {tempo_pausa_minutos} minutos.")
+        await asyncio.sleep(tempo_pausa_segundos)
+        await send_message_to_all(bot, "⚙️ Pausa concluída. A retomar o monitoramento.")
 
-# --- MAIN ---
+
 async def main():
     global daily_score
     history = load_history()
@@ -324,10 +326,11 @@ async def main():
 
     application = Application.builder().token(TOKEN_BOT).build()
     application.add_handler(CommandHandler("relatorio", relatorio_command))
-
-    # ✅ Corrigido: não chamar initialize() nem shutdown()
+    
+    await application.initialize()
     asyncio.create_task(monitor_loop(application.bot))
     await application.run_polling()
+    await application.shutdown()
 
 if __name__ == '__main__':
     try:
@@ -336,3 +339,4 @@ if __name__ == '__main__':
         logging.info("Bot encerrado pelo usuário.")
     except Exception as e:
         logging.error(f"O processo principal falhou completamente: {e}.")
+
