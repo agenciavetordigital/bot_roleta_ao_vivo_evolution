@@ -46,9 +46,10 @@ def configurar_driver():
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
-    service = ChromeService() 
+    service = ChromeService()
     driver = webdriver.Chrome(service=service, options=chrome_options)
     logging.info("Driver do Chrome configurado com sucesso.")
     return driver
@@ -67,11 +68,11 @@ def fazer_login(driver):
         password_input = driver.find_element(By.ID, "senha")
         password_input.send_keys(PADROES_PASS)
         logging.info("Senha preenchida.")
-        
+
         login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         login_button.click()
         logging.info("Botão de login clicado.")
-        
+
         wait.until(EC.url_contains("sistema"))
         logging.info("Login realizado com sucesso! Redirecionado da página de login.")
         return True
@@ -86,7 +87,7 @@ def fazer_login(driver):
         return False
 
 def buscar_ultimo_numero(driver):
-    """Busca o número mais recente da roleta (com debug)."""
+    """Busca o número mais recente da roleta."""
     global ultimo_numero_encontrado
     try:
         if driver.current_url != URL_ROLETA:
@@ -96,33 +97,34 @@ def buscar_ultimo_numero(driver):
 
         wait = WebDriverWait(driver, 30)
 
-        # Captura todos os elementos dentro de #dados
+        # Sempre pega os elementos atualizados
         elementos = wait.until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#dados div, #dados span"))
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#dados > div"))
         )
 
-        logging.info("🔎 Debug: Elementos encontrados em #dados:")
-        for el in elementos:
-            logging.info(f"   -> '{el.text.strip()}'")
+        if not elementos:
+            logging.warning("Nenhum número encontrado em #dados.")
+            return None
 
-        for elemento in elementos:
-            numero_str = elemento.text.strip()
-            if numero_str.isdigit() and 0 <= int(numero_str) <= 36:
-                if numero_str == ultimo_numero_encontrado:
-                    return None
+        numero_str = elementos[0].text.strip()  # Pega o mais recente
 
-                ultimo_numero_encontrado = numero_str
-                numero = int(numero_str)
-                logging.info(f"✅ Número válido encontrado: {numero}")
-                return numero
+        if numero_str == ultimo_numero_encontrado:
+            return None
 
-        logging.warning("⚠️ Nenhum número válido encontrado nos elementos capturados.")
-        return None
+        ultimo_numero_encontrado = numero_str
+
+        if numero_str.isdigit():
+            numero = int(numero_str)
+            logging.info(f"Número válido encontrado: {numero}")
+            return numero
+        else:
+            logging.warning(f"Texto encontrado não é um número válido: '{numero_str}'")
+            return None
 
     except Exception as e:
         logging.error(f"Erro ao buscar número com Selenium: {e}")
         try:
-            logging.error(f"HTML da página no momento do erro: {driver.page_source[:2000]}")
+            logging.error(f"HTML da página no momento do erro: {driver.page_source[:1000]}")
         except:
             pass
         return None
@@ -133,7 +135,9 @@ async def verificar_estrategias(bot, numero):
         return
     for nome_estrategia, condicao in ESTRATEGIAS.items():
         if condicao(numero):
-            mensagem = f"🎯 Gatilho Encontrado! 🎯\n\nEstratégia: *{nome_estrategia}*\nNúmero Sorteado: *{numero}*"
+            mensagem = (f"🎯 Gatilho Encontrado! 🎯\n\n"
+                        f"Estratégia: *{nome_estrategia}*\n"
+                        f"Número Sorteado: *{numero}*")
             logging.info(f"Condição da estratégia '{nome_estrategia}' atendida. Enviando alerta...")
             await enviar_alerta(bot, mensagem)
 
@@ -152,7 +156,7 @@ async def main():
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' (Padrões de Cassino) inicializado com sucesso!")
-        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' conectado e monitorando!")
+        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (Padrões de Cassino) conectado e monitorando!")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
@@ -160,10 +164,10 @@ async def main():
     driver = None
     try:
         driver = configurar_driver()
-        
+
         if not fazer_login(driver):
             raise Exception("O login no Padrões de Cassino falhou.")
-        
+
         while True:
             numero = buscar_ultimo_numero(driver)
             if numero is not None:
