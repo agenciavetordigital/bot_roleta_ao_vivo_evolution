@@ -81,7 +81,7 @@ def initialize_score():
     """Inicializa a estrutura do placar detalhado."""
     score = {"last_check_date": date.today()}
     for name in ESTRATEGIAS:
-        score[name] = {"wins_g0": 0, "wins_g1": 0, "wins_g2": 0, "losses": 0}
+        score[name] = {"wins_sg": 0, "wins_g1": 0, "wins_g2": 0, "losses": 0}
     return score
 
 daily_score = initialize_score()
@@ -158,8 +158,8 @@ def format_score_message():
     messages = ["*Placar do Dia:*"]
     for name, score in daily_score.items():
         if name != "last_check_date":
-            # G0 = Vitória sem Gale, G1 = Vitória no 1º Gale, G2 = Vitória no 2º Gale
-            wins_str = f"✅ G0: {score['wins_g0']}, G1: {score['wins_g1']}, G2: {score['wins_g2']}"
+            # SG = Vitória sem Gale, G1 = Vitória no 1º Gale, G2 = Vitória no 2º Gale
+            wins_str = f"✅ SG: {score['wins_sg']}, G1: {score['wins_g1']}, G2: {score['wins_g2']}"
             losses_str = f"❌ {score['losses']}"
             messages.append(f"*{name}*: {wins_str} | {losses_str}")
     return "\n".join(messages)
@@ -243,10 +243,9 @@ async def processar_numero(bot, numero):
         if is_win:
             await apagar_mensagens_da_jogada(bot)
             
-            # NOVO: Contabiliza a vitória no nível correto de Martingale
             win_level = active_strategy_state["martingale_level"]
             if win_level == 0:
-                daily_score[strategy_name]["wins_g0"] += 1
+                daily_score[strategy_name]["wins_sg"] += 1
                 win_type_message = "Vitória sem Gale!"
             else:
                 daily_score[strategy_name][f"wins_g{win_level}"] += 1
