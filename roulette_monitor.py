@@ -37,8 +37,8 @@ HISTORICO_FILE = 'historico.json'
 # --- CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
 MIN_EXECUCAO_HORAS = 3
 MAX_EXECUCAO_HORAS = 5
-MIN_PAUSA_MINUTOS = 20
-MAX_PAUSA_MINUTOS = 45
+MIN_PAUSA_MINUTOS = 10
+MAX_PAUSA_MINUTOS = 20
 
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
@@ -63,8 +63,8 @@ def get_winners_p2(trigger_number):
             23, 24, 26, 27, 28, 30, 31, 32, 34, 35]
 
 ESTRATEGIAS = {
-    "Especial menos ficha": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
-    "Padrão 95% arriscada": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
+    "Especial 72": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
+    "Padrão P2": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
                                            25, 29, 33, 36, 26, 27, 28,
                                            30, 31, 32, 34, 35],
                                "filter": [], "get_winners": get_winners_p2}
