@@ -74,8 +74,9 @@ def fazer_login(driver):
         login_button.click()
         logging.info("Botão de login clicado.")
         
-        wait.until(EC.url_contains('/sistema'))
-        logging.info("Login realizado com sucesso!")
+        # Espera que a URL mude para algo que NÃO seja a página de login
+        wait.until(EC.not_(EC.url_to_be(URL_LOGIN)))
+        logging.info("Login realizado com sucesso! Redirecionado da página de login.")
         return True
 
     except Exception as e:
