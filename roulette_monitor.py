@@ -78,9 +78,10 @@ numero_anterior = None
 
 # --- PLACAR DIÁRIO E ESTADO DA ESTRATÉGIA ---
 def initialize_score():
+    """Inicializa a estrutura do placar detalhado."""
     score = {"last_check_date": date.today()}
     for name in ESTRATEGIAS:
-        score[name] = {"wins": 0, "losses": 0}
+        score[name] = {"wins_g0": 0, "wins_g1": 0, "wins_g2": 0, "losses": 0}
     return score
 
 daily_score = initialize_score()
@@ -91,7 +92,7 @@ active_strategy_state = {
     "martingale_level": 0,
     "winning_numbers": [],
     "trigger_number": None,
-    "messages": {} # Armazena os IDs das mensagens por chat_id. Ex: { "123": {"trigger": 987, "martingales": [988]} }
+    "messages": {}
 }
 
 def configurar_driver():
@@ -153,11 +154,14 @@ def buscar_ultimo_numero(driver):
         return None
 
 def format_score_message():
-    """Formata a mensagem do placar para todas as estratégias."""
+    """Formata a mensagem do placar detalhado para todas as estratégias."""
     messages = ["*Placar do Dia:*"]
     for name, score in daily_score.items():
         if name != "last_check_date":
-            messages.append(f"*{name}*: ✅ {score['wins']} x ❌ {score['losses']}")
+            # G0 = Vitória sem Gale, G1 = Vitória no 1º Gale, G2 = Vitória no 2º Gale
+            wins_str = f"✅ G0: {score['wins_g0']}, G1: {score['wins_g1']}, G2: {score['wins_g2']}"
+            losses_str = f"❌ {score['losses']}"
+            messages.append(f"*{name}*: {wins_str} | {losses_str}")
     return "\n".join(messages)
 
 async def send_message_to_all(bot, text, **kwargs):
@@ -203,7 +207,7 @@ async def apagar_mensagens_de_martingale(bot):
     for chat_id in CHAT_IDS:
         if chat_id in active_strategy_state["messages"] and "martingales" in active_strategy_state["messages"][chat_id]:
             martingale_messages_to_delete[chat_id] = active_strategy_state["messages"][chat_id]["martingales"]
-            active_strategy_state["messages"][chat_id]["martingales"] = [] # Limpa a lista após o agendamento para exclusão
+            active_strategy_state["messages"][chat_id]["martingales"] = []
 
     await delete_messages_from_all(bot, martingale_messages_to_delete)
 
@@ -232,16 +236,28 @@ async def processar_numero(bot, numero):
     await check_and_reset_daily_score(bot)
     placar_formatado = format_score_message()
 
-    # Se uma estratégia já está ativa, processa o resultado
     if active_strategy_state["active"]:
         strategy_name = active_strategy_state["strategy_name"]
         is_win = numero in active_strategy_state["winning_numbers"]
         
         if is_win:
             await apagar_mensagens_da_jogada(bot)
-            daily_score[strategy_name]["wins"] += 1
+            
+            # NOVO: Contabiliza a vitória no nível correto de Martingale
+            win_level = active_strategy_state["martingale_level"]
+            if win_level == 0:
+                daily_score[strategy_name]["wins_g0"] += 1
+                win_type_message = "Vitória sem Gale!"
+            else:
+                daily_score[strategy_name][f"wins_g{win_level}"] += 1
+                win_type_message = f"Vitória no {win_level}º Martingale"
+
             placar_final_formatado = format_score_message()
-            mensagem = f"✅ Paga Roleta ✅\n\n*Estratégia: {strategy_name}*\nGatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final_formatado}"
+            mensagem = (f"✅ Paga Roleta ✅\n\n"
+                        f"{win_type_message}\n"
+                        f"*Estratégia: {strategy_name}*\n"
+                        f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
+                        f"{placar_final_formatado}")
             await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
             active_strategy_state = {"active": False, "messages": {}}
         else:
@@ -269,7 +285,6 @@ async def processar_numero(bot, numero):
                             f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final_formatado}")
                 await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
                 active_strategy_state = {"active": False, "messages": {}}
-    # Se nenhuma estratégia está ativa, procura por um novo gatilho
     else:
         for name, details in ESTRATEGIAS.items():
             if numero in details["triggers"]:
