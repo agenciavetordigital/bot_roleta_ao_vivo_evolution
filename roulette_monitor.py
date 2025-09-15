@@ -34,13 +34,12 @@ URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
 INTERVALO_VERIFICACAO = 3
 HISTORICO_FILE = 'historico.json'
 
-# --- NOVO: CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
-# O bot irá trabalhar por um tempo entre 3 e 5 horas
+# --- CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
 MIN_EXECUCAO_HORAS = 3
 MAX_EXECUCAO_HORAS = 6
-# E fará uma pausa por um tempo entre 10 e 20 minutos
 MIN_PAUSA_MINUTOS = 25
 MAX_PAUSA_MINUTOS = 45
+
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
 ROULETTE_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8,
@@ -280,20 +279,17 @@ async def relatorio_command(update, context):
 
 # --- INICIALIZAÇÃO E LOOP DE MONITORAMENTO ---
 async def monitor_loop(bot):
-    driver = None
-    while True: # Loop externo para garantir que o bot sempre tente reiniciar
+    while True: # Loop externo que alterna entre trabalho e pausa
+        # --- FASE DE TRABALHO ---
         tempo_execucao_segundos = random.randint(MIN_EXECUCAO_HORAS * 3600, MAX_EXECUCAO_HORAS * 3600)
-        tempo_pausa_minutos = random.randint(MIN_PAUSA_MINUTOS, MAX_PAUSA_MINUTOS)
-        tempo_pausa_segundos = tempo_pausa_minutos * 60
         start_time = time.time()
-        
+        driver = None
         try:
             driver = configurar_driver()
             if not fazer_login(driver):
                 await send_message_to_all(bot, "❌ Falha crítica no login. A tentar novamente em 1 minuto.")
-                # Pausa antes de tentar o login novamente
                 await asyncio.sleep(60)
-                continue # Volta ao início do loop para tentar o login novamente
+                continue # Pula para a próxima iteração do loop, tentando o login novamente
 
             await send_message_to_all(bot, f"✅ Bot conectado e a monitorizar!")
             
@@ -301,21 +297,21 @@ async def monitor_loop(bot):
                 numero = buscar_ultimo_numero(driver)
                 await processar_numero(bot, numero)
                 await asyncio.sleep(INTERVALO_VERIFICACAO)
-            
-            # Pausa programada
-            logging.info(f"Atingido o tempo de execução. A iniciar pausa de {tempo_pausa_minutos} minutos.")
-            await send_message_to_all(bot, f"⏳ Pausa para revisão das estratégias. O bot voltará em aproximadamente {tempo_pausa_minutos} minutos.")
-            
+
         except Exception as e:
-            logging.error(f"Um erro crítico ocorreu no loop de monitoramento: {e}")
-            await send_message_to_all(bot, f"🚨 Erro crítico: {e}. O bot irá reiniciar em 1 minuto.")
+            logging.error(f"Um erro crítico ocorreu durante o ciclo de trabalho: {e}")
+            await send_message_to_all(bot, f"🚨 Erro crítico: {e}. O bot irá fazer uma pausa e tentar novamente.")
         finally:
             if driver:
                 driver.quit()
-                driver = None
-            logging.info(f"Ciclo encerrado. A fazer uma pausa de {tempo_pausa_minutos} minutos.")
-            await asyncio.sleep(tempo_pausa_segundos)
-            await send_message_to_all(bot, "⚙️ Pausa concluída. A retomar o monitoramento.")
+
+        # --- FASE DE PAUSA ---
+        tempo_pausa_minutos = random.randint(MIN_PAUSA_MINUTOS, MAX_PAUSA_MINUTOS)
+        tempo_pausa_segundos = tempo_pausa_minutos * 60
+        logging.info(f"Ciclo de trabalho concluído. A iniciar pausa de {tempo_pausa_minutos} minutos.")
+        await send_message_to_all(bot, f"⏳ Pausa para revisão das estratégias. O bot voltará em aproximadamente {tempo_pausa_minutos} minutos.")
+        await asyncio.sleep(tempo_pausa_segundos)
+        await send_message_to_all(bot, "⚙️ Pausa concluída. A retomar o monitoramento.")
 
 
 async def main():
