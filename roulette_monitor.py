@@ -56,13 +56,13 @@ def get_winners_p2(trigger_number):
 
 ESTRATEGIAS = {
     "Estratégia do 72": {
-        "triggers": [2, 7, 12, 17, 22, 27, 32, 11, 16, 25, 34],
-        "filter": [],  # Sem filtro avançado para esta estratégia
+        "triggers": [2, 12, 17, 16], # Números removidos conforme solicitado
+        "filter": [],
         "get_winners": get_winners_72
     },
     "Estratégia P2 - Roleta": {
         "triggers": [3, 4, 7, 11, 15, 18, 21, 22, 25, 29, 33, 36, 26, 27, 28, 30, 31, 32, 34, 35],
-        "filter": [], # Filtro removido conforme solicitado
+        "filter": [], 
         "get_winners": get_winners_p2
     }
 }
@@ -70,7 +70,7 @@ ESTRATEGIAS = {
 # --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ultimo_numero_processado = None
-numero_anterior = None # Para a filtragem avançada
+numero_anterior = None 
 
 # --- PLACAR DIÁRIO E ESTADO DA ESTRATÉGIA ---
 def initialize_score():
