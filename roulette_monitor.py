@@ -62,47 +62,45 @@ def fazer_login(driver):
         driver.get(URL_LOGIN)
         wait = WebDriverWait(driver, 20)
 
-        # Espera e preenche o e-mail (usando o ID do campo)
         email_input = wait.until(EC.presence_of_element_located((By.ID, "email")))
         email_input.send_keys(PADROES_USER)
         logging.info("E-mail preenchido.")
 
-        # Encontra e preenche a senha
         password_input = driver.find_element(By.ID, "password")
         password_input.send_keys(PADROES_PASS)
         logging.info("Senha preenchida.")
         
-        # Encontra e clica no botão de login
         login_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         login_button.click()
         logging.info("Botão de login clicado.")
         
-        # Aguarda o redirecionamento para a página do sistema
         wait.until(EC.url_contains('/sistema'))
         logging.info("Login realizado com sucesso!")
         return True
 
     except Exception as e:
         logging.error(f"Falha no processo de login: {e}")
+        # PASSO DE DIAGNÓSTICO AVANÇADO
+        try:
+            logging.error(f"URL atual no momento do erro: {driver.current_url}")
+            logging.error(f"HTML da página no momento do erro: {driver.page_source[:2000]}")
+        except Exception as debug_e:
+            logging.error(f"Erro adicional ao tentar obter informações de depuração: {debug_e}")
         return False
 
 def buscar_ultimo_numero(driver):
     """Busca o número mais recente da roleta."""
     global ultimo_numero_encontrado
     try:
-        # Garante que estamos na página correta
         if driver.current_url != URL_ROLETA:
             driver.get(URL_ROLETA)
 
         wait = WebDriverWait(driver, 30)
         
-        # Espera pelo container que segura todos os números recentes
-        # O ID "dados" é um seletor muito confiável
         container_principal = wait.until(
              EC.presence_of_element_located((By.ID, "dados"))
         )
         
-        # O número mais recente é o primeiro elemento 'div' dentro deste container
         primeiro_numero_element = container_principal.find_element(By.TAG_NAME, "div")
         numero_str = primeiro_numero_element.text.strip()
         
@@ -121,7 +119,6 @@ def buscar_ultimo_numero(driver):
 
     except Exception as e:
         logging.error(f"Erro ao buscar número com Selenium: {e}")
-        # PASSO DE DIAGNÓSTICO: Salva o HTML da página no log se algo der errado
         try:
             logging.error(f"HTML da página no momento do erro: {driver.page_source[:2000]}")
         except:
