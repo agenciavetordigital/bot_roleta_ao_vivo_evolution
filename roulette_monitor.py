@@ -6,6 +6,7 @@ import logging
 import asyncio
 import telegram
 import json
+import random
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler
 from selenium import webdriver
@@ -33,11 +34,13 @@ URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
 INTERVALO_VERIFICACAO = 3
 HISTORICO_FILE = 'historico.json'
 
-# --- NOVO: CONFIGURAÇÃO DO TIMER DE PAUSA ---
-# Tempo em horas que o bot ficará a monitorizar antes de fazer uma pausa
-TEMPO_DE_EXECUCAO_HORAS = 6
-# Tempo em minutos que o bot ficará em pausa
-TEMPO_DE_PAUSA_MINUTOS = 45
+# --- NOVO: CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
+# O bot irá trabalhar por um tempo entre 3 e 5 horas
+MIN_EXECUCAO_HORAS = 3
+MAX_EXECUCAO_HORAS = 6
+# E fará uma pausa por um tempo entre 10 e 20 minutos
+MIN_PAUSA_MINUTOS = 25
+MAX_PAUSA_MINUTOS = 45
 
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
@@ -62,8 +65,8 @@ def get_winners_p2(trigger_number):
             23, 24, 26, 27, 28, 30, 31, 32, 34, 35]
 
 ESTRATEGIAS = {
-    "Estratégia menos fichas": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
-    "Estratégia 95% - Roleta": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
+    "Estratégia do 72": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
+    "Estratégia P2 - Roleta": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
                                            25, 29, 33, 36, 26, 27, 28,
                                            30, 31, 32, 34, 35],
                                "filter": [], "get_winners": get_winners_p2}
@@ -274,10 +277,13 @@ async def relatorio_command(update, context):
 # --- INICIALIZAÇÃO E LOOP DE MONITORAMENTO ---
 async def monitor_loop(bot):
     driver = None
-    tempo_execucao_segundos = TEMPO_DE_EXECUCAO_HORAS * 3600
-    tempo_pausa_segundos = TEMPO_DE_PAUSA_MINUTOS * 60
     
     while True:
+        # A cada novo ciclo, calcula um tempo de execução e pausa aleatórios
+        tempo_execucao_segundos = random.randint(MIN_EXECUCAO_HORAS * 3600, MAX_EXECUCAO_HORAS * 3600)
+        tempo_pausa_minutos = random.randint(MIN_PAUSA_MINUTOS, MAX_PAUSA_MINUTOS)
+        tempo_pausa_segundos = tempo_pausa_minutos * 60
+        
         start_time = time.time()
         try:
             driver = configurar_driver()
@@ -292,9 +298,9 @@ async def monitor_loop(bot):
                 await processar_numero(bot, numero)
                 await asyncio.sleep(INTERVALO_VERIFICACAO)
             
-            # Pausa programada
-            logging.info(f"Atingido o tempo de execução de {TEMPO_DE_EXECUCAO_HORAS} horas. A iniciar pausa.")
-            await send_message_to_all(bot, f"⏳ Pausa para revisão das estratégias para uma maior assertividade. O bot voltará em {TEMPO_DE_PAUSA_MINUTOS} minutos.")
+            # Pausa programada com tempo aleatório
+            logging.info(f"Atingido o tempo de execução. A iniciar pausa de {tempo_pausa_minutos} minutos.")
+            await send_message_to_all(bot, f"⏳ Pausa para revisão das estratégias. O bot voltará em aproximadamente {tempo_pausa_minutos} minutos.")
             if driver:
                 driver.quit()
                 driver = None
