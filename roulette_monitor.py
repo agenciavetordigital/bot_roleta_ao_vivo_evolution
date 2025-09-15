@@ -6,7 +6,6 @@ import logging
 import asyncio
 import telegram
 import json
-import random
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler
 from selenium import webdriver
@@ -34,14 +33,6 @@ URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
 INTERVALO_VERIFICACAO = 3
 HISTORICO_FILE = 'historico.json'
 
-# --- NOVO: CONFIGURAÇÃO DO TIMER DE PAUSA ALEATÓRIO ---
-# O bot irá trabalhar por um tempo entre 3 e 5 horas
-MIN_EXECUCAO_HORAS = 3
-MAX_EXECUCAO_HORAS = 5
-# E fará uma pausa por um tempo entre 10 e 20 minutos
-MIN_PAUSA_MINUTOS = 10
-MAX_PAUSA_MINUTOS = 20
-
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
 ROULETTE_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8,
@@ -65,8 +56,8 @@ def get_winners_p2(trigger_number):
             23, 24, 26, 27, 28, 30, 31, 32, 34, 35]
 
 ESTRATEGIAS = {
-    "Especial 72": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
-    "Padrão P2": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
+    "Especial menos fichas": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
+    "Padrão 95% mais um loss quebra haha": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
                                            25, 29, 33, 36, 26, 27, 28,
                                            30, 31, 32, 34, 35],
                                "filter": [], "get_winners": get_winners_p2}
@@ -281,40 +272,29 @@ async def relatorio_command(update, context):
 
 # --- INICIALIZAÇÃO E LOOP DE MONITORAMENTO ---
 async def monitor_loop(bot):
-    while True: # Loop externo que alterna entre trabalho e pausa
-        # --- FASE DE TRABALHO ---
-        tempo_execucao_segundos = random.randint(MIN_EXECUCAO_HORAS * 3600, MAX_EXECUCAO_HORAS * 3600)
-        start_time = time.time()
-        driver = None
+    driver = None
+    while True: # Loop externo para garantir que o bot sempre tente reiniciar
         try:
             driver = configurar_driver()
             if not fazer_login(driver):
                 await send_message_to_all(bot, "❌ Falha crítica no login. A tentar novamente em 1 minuto.")
-                await asyncio.sleep(60)
-                continue # Pula para a próxima iteração do loop, tentando o login novamente
-
+                raise Exception("O login no Padrões de Cassino falhou.")
+            
             await send_message_to_all(bot, f"✅ Bot conectado e a monitorizar!")
             
-            while time.time() - start_time < tempo_execucao_segundos:
+            while True:
                 numero = buscar_ultimo_numero(driver)
                 await processar_numero(bot, numero)
                 await asyncio.sleep(INTERVALO_VERIFICACAO)
-
+                
         except Exception as e:
-            logging.error(f"Um erro crítico ocorreu durante o ciclo de trabalho: {e}")
-            await send_message_to_all(bot, f"🚨 Erro crítico: {e}. O bot irá fazer uma pausa e tentar novamente.")
+            logging.error(f"Um erro crítico ocorreu no loop de monitoramento: {e}")
+            await send_message_to_all(bot, f"🚨 Erro crítico: {e}. O bot irá reiniciar em 1 minuto.")
         finally:
             if driver:
                 driver.quit()
-        
-        # --- FASE DE PAUSA ---
-        tempo_pausa_minutos = random.randint(MIN_PAUSA_MINUTOS, MAX_PAUSA_MINUTOS)
-        tempo_pausa_segundos = tempo_pausa_minutos * 60
-        logging.info(f"Ciclo de trabalho concluído. A iniciar pausa de {tempo_pausa_minutos} minutos.")
-        await send_message_to_all(bot, f"⏳ Pausa para revisão das estratégias. O bot voltará em aproximadamente {tempo_pausa_minutos} minutos.")
-        await asyncio.sleep(tempo_pausa_segundos)
-        await send_message_to_all(bot, "⚙️ Pausa concluída. A retomar o monitoramento.")
-
+            logging.info("Driver do Selenium encerrado. A reiniciar em 1 minuto.")
+            await asyncio.sleep(60)
 
 async def main():
     global daily_score
