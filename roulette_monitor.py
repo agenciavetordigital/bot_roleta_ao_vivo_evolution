@@ -42,7 +42,6 @@ MAX_EXECUCAO_HORAS = 6
 MIN_PAUSA_MINUTOS = 25
 MAX_PAUSA_MINUTOS = 45
 
-
 # --- LÓGICA DAS ESTRATÉGIAS ---
 ROULETTE_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8,
                   23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12,
@@ -186,7 +185,7 @@ async def check_and_reset_daily_score(bot):
         await send_message_to_all(bot, "🌞 Placar diário zerado. Bom dia e boas apostas!")
 
 async def processar_numero(bot, numero):
-    global active_strategy_state, daily_score, numero_anterior
+    global active_strategy_state, daily_score
     if numero is None: return
     await check_and_reset_daily_score(bot)
     placar_formatado = format_score_message(daily_score)
@@ -199,6 +198,7 @@ async def processar_numero(bot, numero):
             win_key = f"wins_g{win_level}" if win_level > 0 else "wins_sg"
             daily_score[strategy_name][win_key] += 1
             win_type_message = f"Vitória no {win_level}º Martingale" if win_level > 0 else "Vitória sem Gale!"
+            
             placar_final_formatado = format_score_message(daily_score)
             mensagem = (f"✅ Paga Roleta ✅\n\n"
                         f"*{win_type_message}*\n"
@@ -251,9 +251,11 @@ async def relatorio_command(update, context):
         if not args:
             await update.message.reply_text("Por favor, especifique o dia. Ex: `/relatorio ontem` ou `/relatorio 2025-09-14`")
             return
+            
         target_day_str = args[0].lower()
         history = load_history()
         target_date = None
+
         if target_day_str == "ontem":
             target_date = (date.today() - timedelta(days=1)).isoformat()
         else:
@@ -263,6 +265,7 @@ async def relatorio_command(update, context):
             except ValueError:
                 await update.message.reply_text("Formato de data inválido. Use AAAA-MM-DD.")
                 return
+
         if target_date in history:
             score_data = history[target_date]
             report_title = f"📜 Relatório do dia {date.fromisoformat(target_date).strftime('%d/%m/%Y')}:"
@@ -270,6 +273,7 @@ async def relatorio_command(update, context):
             await update.message.reply_text(report_message, parse_mode=ParseMode.MARKDOWN)
         else:
             await update.message.reply_text(f"Nenhum dado encontrado para o dia {target_date}.")
+
     except Exception as e:
         logging.error(f"Erro no comando /relatorio: {e}")
         await update.message.reply_text("Ocorreu um erro ao processar o seu pedido.")
@@ -277,7 +281,6 @@ async def relatorio_command(update, context):
 # --- INICIALIZAÇÃO E LOOP DE MONITORAMENTO ---
 async def monitor_loop(bot):
     driver = None
-    
     while True:
         # A cada novo ciclo, calcula um tempo de execução e pausa aleatórios
         tempo_execucao_segundos = random.randint(MIN_EXECUCAO_HORAS * 3600, MAX_EXECUCAO_HORAS * 3600)
@@ -293,28 +296,26 @@ async def monitor_loop(bot):
             
             await send_message_to_all(bot, f"✅ Bot conectado e a monitorizar!")
             
+            # Loop de monitoramento principal com duração aleatória
             while time.time() - start_time < tempo_execucao_segundos:
                 numero = buscar_ultimo_numero(driver)
                 await processar_numero(bot, numero)
                 await asyncio.sleep(INTERVALO_VERIFICACAO)
             
-            # Pausa programada com tempo aleatório
+            # Fim do ciclo de trabalho, inicia a pausa programada
             logging.info(f"Atingido o tempo de execução. A iniciar pausa de {tempo_pausa_minutos} minutos.")
             await send_message_to_all(bot, f"⏳ Pausa para revisão das estratégias. O bot voltará em aproximadamente {tempo_pausa_minutos} minutos.")
-            if driver:
-                driver.quit()
-                driver = None
-            await asyncio.sleep(tempo_pausa_segundos)
-            await send_message_to_all(bot, "⚙️ Atualização concluída, estratégias atualizadas. A retomar o monitoramento.")
-
+            
         except Exception as e:
             logging.error(f"Um erro crítico ocorreu no loop de monitoramento: {e}")
             await send_message_to_all(bot, f"🚨 Erro crítico: {e}. O bot irá reiniciar em 1 minuto.")
         finally:
             if driver:
                 driver.quit()
-            logging.info("Driver do Selenium encerrado. A reiniciar em 1 minuto.")
-            await asyncio.sleep(60)
+            logging.info(f"Driver do Selenium encerrado. A fazer uma pausa de {tempo_pausa_minutos} minutos.")
+            await asyncio.sleep(tempo_pausa_segundos)
+            await send_message_to_all(bot, "⚙️ Pausa concluída. A retomar o monitoramento.")
+
 
 async def main():
     global daily_score
