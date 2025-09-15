@@ -28,12 +28,12 @@ URL_ROLETA = 'https://jv.padroesdecassino.com.br/sistema/roletabrasileira'
 URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
 INTERVALO_VERIFICACAO = 3
 
-# --- LÓGICA DA ESTRATÉGIA ---
+# --- LÓGICA DAS ESTRATÉGIAS ---
 ROULETTE_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26]
 
-def get_winning_numbers(trigger_number):
+def get_winners_72(trigger_number):
     """
-    Calcula os números da aposta: o 0, o gatilho e seus 8 vizinhos (4 para cada lado).
+    Calcula os números da aposta para a Estratégia do 72: o 0, o gatilho e seus 8 vizinhos.
     """
     try:
         index = ROULETTE_WHEEL.index(trigger_number)
@@ -48,28 +48,47 @@ def get_winning_numbers(trigger_number):
     except ValueError:
         return [0, trigger_number]
 
+def get_winners_p2(trigger_number):
+    """
+    Retorna a lista fixa de números para a Estratégia P2.
+    """
+    return [0, 1, 2, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 19, 20, 23, 24, 26, 27, 28, 30, 31, 32, 34, 35]
+
 ESTRATEGIAS = {
-    "Estratégia do 72": [2, 7, 12, 17, 22, 27, 32, 11, 16, 25, 34],
+    "Estratégia do 72": {
+        "triggers": [2, 7, 12, 17, 22, 27, 32, 11, 16, 25, 34],
+        "filter": [],  # Sem filtro avançado para esta estratégia
+        "get_winners": get_winners_72
+    },
+    "Estratégia P2 - Roleta": {
+        "triggers": [3, 4, 7, 11, 15, 18, 21, 22, 25, 29, 33, 36, 26, 27, 28, 30, 31, 32, 34, 35],
+        "filter": [], # Filtro removido conforme solicitado
+        "get_winners": get_winners_p2
+    }
 }
 
 # --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-ultimo_numero_encontrado = None
+ultimo_numero_processado = None
+numero_anterior = None # Para a filtragem avançada
 
 # --- PLACAR DIÁRIO E ESTADO DA ESTRATÉGIA ---
-daily_score = {
-    "wins": 0,
-    "losses": 0,
-    "last_check_date": date.today()
-}
+def initialize_score():
+    score = {"last_check_date": date.today()}
+    for name in ESTRATEGIAS:
+        score[name] = {"wins": 0, "losses": 0}
+    return score
+
+daily_score = initialize_score()
+
 active_strategy_state = {
     "active": False,
     "strategy_name": "",
     "martingale_level": 0,
     "winning_numbers": [],
     "trigger_number": None,
-    "trigger_message_id": None, # ID da mensagem de gatilho
-    "martingale_message_ids": [] # IDs das mensagens de martingale
+    "trigger_message_id": None,
+    "martingale_message_ids": []
 }
 
 def configurar_driver():
@@ -107,21 +126,22 @@ def fazer_login(driver):
 
 def buscar_ultimo_numero(driver):
     """Busca o número mais recente da roleta de forma otimizada."""
-    global ultimo_numero_encontrado
+    global ultimo_numero_processado, numero_anterior
     try:
         wait = WebDriverWait(driver, 10)
         container_recente = wait.until(EC.presence_of_element_located((By.ID, "dados")))
         ultimo_numero_div = container_recente.find_element(By.CSS_SELECTOR, "div:last-child")
         numero_str = ultimo_numero_div.text.strip()
         
-        if numero_str == ultimo_numero_encontrado:
+        if numero_str == ultimo_numero_processado:
             return None 
 
-        ultimo_numero_encontrado = numero_str
+        numero_anterior = int(ultimo_numero_processado) if ultimo_numero_processado and ultimo_numero_processado.isdigit() else None
+        ultimo_numero_processado = numero_str
         
         if numero_str.isdigit():
             numero = int(numero_str)
-            logging.info(f"✅ Novo número encontrado: {numero}")
+            logging.info(f"✅ Novo número encontrado: {numero} (Anterior: {numero_anterior})")
             return numero
         else:
             return None
@@ -129,15 +149,20 @@ def buscar_ultimo_numero(driver):
         logging.warning("Não foi possível buscar o último número. A página pode estar carregando.")
         return None
 
+def format_score_message():
+    """Formata a mensagem do placar para todas as estratégias."""
+    messages = ["*Placar do Dia:*"]
+    for name, score in daily_score.items():
+        if name != "last_check_date":
+            messages.append(f"*{name}*: ✅ {score['wins']} x ❌ {score['losses']}")
+    return "\n".join(messages)
+
 async def apagar_mensagens_da_jogada(bot):
     """Apaga a mensagem de gatilho e as de martingale."""
     global active_strategy_state
-    
     messages_to_delete = active_strategy_state.get("martingale_message_ids", [])
     if active_strategy_state.get("trigger_message_id"):
         messages_to_delete.append(active_strategy_state["trigger_message_id"])
-
-    logging.info(f"Apagando {len(messages_to_delete)} mensagens da jogada anterior...")
     for msg_id in messages_to_delete:
         try:
             await bot.delete_message(chat_id=CHAT_ID, message_id=msg_id)
@@ -147,7 +172,6 @@ async def apagar_mensagens_da_jogada(bot):
 async def apagar_mensagens_de_martingale(bot):
     """Apaga apenas as mensagens de martingale."""
     global active_strategy_state
-    logging.info(f"Apagando {len(active_strategy_state['martingale_message_ids'])} mensagens de martingale...")
     for msg_id in active_strategy_state["martingale_message_ids"]:
         try:
             await bot.delete_message(chat_id=CHAT_ID, message_id=msg_id)
@@ -162,62 +186,71 @@ async def check_and_reset_daily_score(bot):
     if daily_score["last_check_date"] != today:
         logging.info(f"Novo dia detectado! Resetando o placar.")
         
-        yesterday_score_msg = (f"Resumo do dia {daily_score['last_check_date'].strftime('%d/%m/%Y')}:\n"
-                               f"Placar Final: ✅ {daily_score['wins']} x ❌ {daily_score['losses']}")
-        await bot.send_message(chat_id=CHAT_ID, text=yesterday_score_msg)
+        summary_title = f"Resumo do dia {daily_score['last_check_date'].strftime('%d/%m/%Y')}:"
+        final_scores = format_score_message().replace("*Placar do Dia:*", "*Placar Final:*")
+        
+        await bot.send_message(chat_id=CHAT_ID, text=f"{summary_title}\n{final_scores}", parse_mode=ParseMode.MARKDOWN)
 
-        daily_score = {"wins": 0, "losses": 0, "last_check_date": today}
+        daily_score = initialize_score()
         await bot.send_message(chat_id=CHAT_ID, text="Placar diário zerado. Bom dia e boas apostas!")
 
 async def processar_numero(bot, numero):
     """Verifica o número, gerencia o estado da estratégia e envia alertas."""
-    global active_strategy_state, daily_score
+    global active_strategy_state, daily_score, numero_anterior
 
     if numero is None:
         return
 
     await check_and_reset_daily_score(bot)
-    placar_atual = f"Placar do Dia: ✅ {daily_score['wins']} x ❌ {daily_score['losses']}"
+    placar_formatado = format_score_message()
 
+    # Se uma estratégia já está ativa, processa o resultado
     if active_strategy_state["active"]:
+        strategy_name = active_strategy_state["strategy_name"]
         is_win = numero in active_strategy_state["winning_numbers"]
         
         if is_win:
-            await apagar_mensagens_da_jogada(bot) # Apaga tudo (gatilho + martingales)
-            daily_score["wins"] += 1
-            placar_final = f"Placar do Dia: ✅ {daily_score['wins']} x ❌ {daily_score['losses']}"
-            mensagem = f"✅ Paga Roleta ✅\n\nGatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final}"
+            await apagar_mensagens_da_jogada(bot)
+            daily_score[strategy_name]["wins"] += 1
+            placar_final_formatado = format_score_message()
+            mensagem = f"✅ Paga Roleta ✅\n\n*Estratégia: {strategy_name}*\nGatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final_formatado}"
             await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
             active_strategy_state = {"active": False, "trigger_message_id": None, "martingale_message_ids": []}
         else:
-            await apagar_mensagens_de_martingale(bot) # Apaga apenas os martingales antigos
+            await apagar_mensagens_de_martingale(bot)
             active_strategy_state["martingale_level"] += 1
             level = active_strategy_state["martingale_level"]
             
             if level <= 2:
-                mensagem = (f"❌ Roleta Safada ❌\n\n"
+                mensagem = (f"❌ Roleta Safada ❌\n\n*Estratégia: {strategy_name}*\n"
                             f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
-                            f"Entrar no *{level}º Martingale*\n\n{placar_atual}")
+                            f"Entrar no *{level}º Martingale*\n\n{placar_formatado}")
                 sent_message = await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
                 active_strategy_state["martingale_message_ids"].append(sent_message.message_id)
             else:
-                await apagar_mensagens_da_jogada(bot) # Apaga tudo (gatilho + martingales)
-                daily_score["losses"] += 1
-                placar_final = f"Placar do Dia: ✅ {daily_score['wins']} x ❌ {daily_score['losses']}"
-                mensagem = (f"❌ Roleta Safada ❌\n\n"
+                await apagar_mensagens_da_jogada(bot)
+                daily_score[strategy_name]["losses"] += 1
+                placar_final_formatado = format_score_message()
+                mensagem = (f"❌ Roleta Safada ❌\n\n*Estratégia: {strategy_name}*\n"
                             f"Loss final no 2º Martingale.\n"
-                            f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final}")
+                            f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final_formatado}")
                 await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
                 active_strategy_state = {"active": False, "trigger_message_id": None, "martingale_message_ids": []}
+    # Se nenhuma estratégia está ativa, procura por um novo gatilho
     else:
-        for name, triggers in ESTRATEGIAS.items():
-            if numero in triggers:
-                winning_numbers = get_winning_numbers(numero)
+        for name, details in ESTRATEGIAS.items():
+            if numero in details["triggers"]:
+                # Verifica a filtragem avançada
+                if details["filter"] and numero_anterior in details["filter"]:
+                    logging.info(f"Gatilho {numero} para '{name}' ignorado. Número anterior ({numero_anterior}) está no filtro.")
+                    continue
+
+                winning_numbers = details["get_winners"](numero)
                 mensagem = (f"🎯 Gatilho Encontrado! 🎯\n\n"
                             f"Estratégia: *{name}*\n"
                             f"Número Gatilho: *{numero}*\n\n"
                             f"Apostar em: `{', '.join(map(str, sorted(winning_numbers)))}`\n\n"
-                            f"{placar_atual}\n\n"
+                            f"{placar_formatado}\n\n"
                             f"[Fazer Aposta]({URL_APOSTA})")
                 sent_message = await bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.MARKDOWN)
                 
@@ -227,7 +260,7 @@ async def processar_numero(bot, numero):
                     "trigger_message_id": sent_message.message_id,
                     "martingale_message_ids": []
                 }
-                break
+                break # Sai do loop para não ativar outra estratégia ao mesmo tempo
 
 async def main():
     """Função principal."""
