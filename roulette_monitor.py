@@ -74,7 +74,7 @@ def load_history():
             with open(HISTORICO_FILE, 'r') as f:
                 return json.load(f)
         except json.JSONDecodeError:
-            return {} # Retorna um dicionário vazio se o arquivo estiver corrompido ou vazio
+            return {}
     return {}
 
 def save_history(history):
@@ -154,14 +154,11 @@ def format_score_message(score_data, title="📊 *Placar do Dia* 📊"):
     return "\n\n".join(messages)
 
 async def send_message_to_all(bot, text, **kwargs):
-    sent_messages = {}
     for chat_id in CHAT_IDS:
         try:
-            message = await bot.send_message(chat_id=chat_id, text=text, **kwargs)
-            sent_messages[chat_id] = message
+            await bot.send_message(chat_id=chat_id, text=text, **kwargs)
         except Exception as e:
             logging.error(f"Erro ao enviar mensagem para o chat_id {chat_id}: {e}")
-    return sent_messages
 
 # --- LÓGICA PRINCIPAL ---
 async def check_and_reset_daily_score(bot):
@@ -169,16 +166,12 @@ async def check_and_reset_daily_score(bot):
     today_str = date.today().isoformat()
     if daily_score["last_check_date"] != today_str:
         logging.info(f"Novo dia detectado! Salvando placar e resetando.")
-        
         history = load_history()
         history[daily_score["last_check_date"]] = daily_score
         save_history(history)
-        
         summary_title = f"Resumo do dia {date.fromisoformat(daily_score['last_check_date']).strftime('%d/%m/%Y')}:"
         final_scores = format_score_message(daily_score, title="*Placar Final:*")
-        
         await send_message_to_all(bot, f"{summary_title}\n{final_scores}", parse_mode=ParseMode.MARKDOWN)
-
         daily_score = initialize_score()
         await send_message_to_all(bot, "🌞 Placar diário zerado. Bom dia e boas apostas!")
 
@@ -193,12 +186,10 @@ async def processar_numero(bot, numero):
         is_win = numero in active_strategy_state["winning_numbers"]
         if is_win:
             win_level = active_strategy_state["martingale_level"]
-            if win_level == 0:
-                daily_score[strategy_name]["wins_sg"] += 1
-                win_type_message = "Vitória sem Gale!"
-            else:
-                daily_score[strategy_name][f"wins_g{win_level}"] += 1
-                win_type_message = f"Vitória no {win_level}º Martingale"
+            win_key = f"wins_g{win_level}" if win_level > 0 else "wins_sg"
+            daily_score[strategy_name][win_key] += 1
+            win_type_message = f"Vitória no {win_level}º Martingale" if win_level > 0 else "Vitória sem Gale!"
+            
             placar_final_formatado = format_score_message(daily_score)
             mensagem = (f"✅ Paga Roleta ✅\n\n"
                         f"*{win_type_message}*\n"
@@ -281,7 +272,7 @@ async def relatorio_command(update, context):
 # --- INICIALIZAÇÃO E LOOP DE MONITORAMENTO ---
 async def monitor_loop(bot):
     driver = None
-    while True: # Adiciona um loop de reinicialização para o monitoramento
+    while True:
         try:
             driver = configurar_driver()
             if not fazer_login(driver):
@@ -317,15 +308,24 @@ async def main():
     application = Application.builder().token(TOKEN_BOT).build()
     application.add_handler(CommandHandler("relatorio", relatorio_command))
     
-    # Executa o monitoramento e o bot de comandos em paralelo
-    await asyncio.gather(
-        monitor_loop(application.bot),
-        application.run_polling()
-    )
+    # Esta é a estrutura correta para rodar as tarefas em paralelo de forma estável.
+    # Primeiro, inicializamos a aplicação.
+    await application.initialize()
+    
+    # Em seguida, agendamos o nosso loop de monitoramento para rodar em segundo plano.
+    asyncio.create_task(monitor_loop(application.bot))
+    
+    # Finalmente, iniciamos o bot para ouvir os comandos. Esta função roda para sempre.
+    await application.run_polling()
+    
+    # Esta linha geralmente não é alcançada, mas é uma boa prática para um encerramento gracioso.
+    await application.shutdown()
 
 if __name__ == '__main__':
     try:
         asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot encerrado pelo usuário.")
     except Exception as e:
         logging.error(f"O processo principal falhou completamente: {e}.")
 
