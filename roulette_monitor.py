@@ -64,8 +64,8 @@ def get_winners_p2(trigger_number):
             23, 24, 26, 27, 28, 30, 31, 32, 34, 35]
 
 ESTRATEGIAS = {
-    "Estratégia do 72": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
-    "Estratégia P2 - Roleta": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
+    "Estratégia menos fichas": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
+    "Estratégia 95% - Roleta": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22,
                                            25, 29, 33, 36, 26, 27, 28,
                                            30, 31, 32, 34, 35],
                                "filter": [], "get_winners": get_winners_p2}
@@ -342,5 +342,6 @@ if __name__ == '__main__':
         logging.info("Bot encerrado pelo usuário.")
     except Exception as e:
         logging.error(f"O processo principal falhou completamente: {e}.")
+
 
 
