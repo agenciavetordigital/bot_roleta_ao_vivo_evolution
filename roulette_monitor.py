@@ -20,12 +20,6 @@ PADROES_USER = os.environ.get('PADROES_USER')
 PADROES_PASS = os.environ.get('PADROES_PASS')
 URL_APOSTA = os.environ.get('URL_APOSTA')
 
-# --- NOVAS CONFIGURAÇÕES DE APOSTA AUTOMÁTICA ---
-# Defina estes valores nas suas variáveis da Railway
-STAKE_SG = os.environ.get('STAKE_SG', '1')  # Valor da aposta inicial (Sem Gale)
-STAKE_G1 = os.environ.get('STAKE_G1', '2')  # Valor da aposta no 1º Martingale
-STAKE_G2 = os.environ.get('STAKE_G2', '4')  # Valor da aposta no 2º Martingale
-
 if not all([TOKEN_BOT, CHAT_IDS_STR, PADROES_USER, PADROES_PASS, URL_APOSTA]):
     logging.critical("Todas as variáveis de ambiente (TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS, URL_APOSTA) devem ser definidas!")
     exit()
@@ -135,26 +129,6 @@ def format_score_message():
             messages.append(f"*{name}*: {wins_str} | {losses_str}")
     return "\n".join(messages)
 
-async def fazer_aposta_automatica(stake, numeros):
-    """
-    FUNÇÃO DE SIMULAÇÃO: Esta função representa o processo de aposta automática.
-    Para uma implementação real, esta seria uma função muito complexa.
-    """
-    logging.info(f"--- SIMULAÇÃO DE APOSTA AUTOMÁTICA ---")
-    logging.info(f"Stake a ser apostada: {stake}")
-    logging.info(f"Números a cobrir: {numeros}")
-    logging.info(f"PASSOS NECESSÁRIOS (MUITO COMPLEXOS):")
-    logging.info(f"1. Mudar o controle do Selenium para a janela/aba da casa de apostas.")
-    logging.info(f"2. Garantir que o login na casa de apostas está ativo.")
-    logging.info(f"3. Navegar para a mesa da Roleta Brasileira da Evolution.")
-    logging.info(f"4. Identificar e clicar na ficha correspondente ao valor de 'stake'.")
-    logging.info(f"5. Para cada número na lista 'numeros', encontrar e clicar no local correspondente na mesa.")
-    logging.info(f"6. Clicar no botão 'Confirmar Aposta' antes que o tempo se esgote.")
-    logging.info(f"--- FIM DA SIMULAÇÃO ---")
-    # Em uma implementação real, esta função retornaria True se a aposta foi feita com sucesso.
-    await asyncio.sleep(1) # Simula o tempo que levaria para fazer a aposta
-    return True
-
 async def send_message_to_all(bot, text, **kwargs):
     sent_messages = {}
     for chat_id in CHAT_IDS:
@@ -229,8 +203,6 @@ async def processar_numero(bot, numero):
             active_strategy_state["martingale_level"] += 1
             level = active_strategy_state["martingale_level"]
             if level <= 2:
-                stake = STAKE_G1 if level == 1 else STAKE_G2
-                await fazer_aposta_automatica(stake, active_strategy_state["winning_numbers"])
                 mensagem = (f"❌ Roleta Safada ❌\n\n*Estratégia: {strategy_name}*\n"
                             f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
                             f"Entrar no *{level}º Martingale*\n\n{placar_formatado}")
@@ -254,7 +226,6 @@ async def processar_numero(bot, numero):
                     logging.info(f"Gatilho {numero} para '{name}' ignorado. Número anterior ({numero_anterior}) está no filtro.")
                     continue
                 winning_numbers = details["get_winners"](numero)
-                await fazer_aposta_automatica(STAKE_SG, winning_numbers)
                 mensagem = (f"🎯 Gatilho Encontrado! 🎯\n\nEstratégia: *{name}*\nNúmero Gatilho: *{numero}*\n\n"
                             f"Apostar em: `{', '.join(map(str, sorted(winning_numbers)))}`\n\n"
                             f"{placar_formatado}\n\n[Fazer Aposta]({URL_APOSTA})")
