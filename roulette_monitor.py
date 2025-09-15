@@ -121,13 +121,15 @@ def buscar_ultimo_numero(driver):
         return None
 
 def format_score_message():
-    messages = ["*Placar do Dia:*"]
+    """Formata a mensagem do placar com mais clareza e emojis."""
+    messages = ["📊 *Placar do Dia* 📊"]
     for name, score in daily_score.items():
         if name != "last_check_date":
-            wins_str = f"✅ SG: {score['wins_sg']}, G1: {score['wins_g1']}, G2: {score['wins_g2']}"
-            losses_str = f"❌ {score['losses']}"
-            messages.append(f"*{name}*: {wins_str} | {losses_str}")
-    return "\n".join(messages)
+            # Monta a string de vitórias
+            wins_str = f"SG: {score['wins_sg']} | G1: {score['wins_g1']} | G2: {score['wins_g2']}"
+            # Monta a linha completa da estratégia
+            messages.append(f"*{name}*:\n`    `✅ `{wins_str}`\n`    `❌ `{score['losses']}`")
+    return "\n\n".join(messages)
 
 async def send_message_to_all(bot, text, **kwargs):
     sent_messages = {}
@@ -194,8 +196,11 @@ async def processar_numero(bot, numero):
                 daily_score[strategy_name][f"wins_g{win_level}"] += 1
                 win_type_message = f"Vitória no {win_level}º Martingale"
             placar_final_formatado = format_score_message()
-            mensagem = (f"✅ Paga Roleta ✅\n\n{win_type_message}\n*Estratégia: {strategy_name}*\n"
-                        f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final_formatado}")
+            mensagem = (f"✅ Paga Roleta ✅\n\n"
+                        f"*{win_type_message}*\n"
+                        f"_Estratégia: {strategy_name}_\n"
+                        f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
+                        f"{placar_final_formatado}")
             await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
             active_strategy_state = {"active": False, "messages": {}}
         else:
@@ -203,9 +208,11 @@ async def processar_numero(bot, numero):
             active_strategy_state["martingale_level"] += 1
             level = active_strategy_state["martingale_level"]
             if level <= 2:
-                mensagem = (f"❌ Roleta Safada ❌\n\n*Estratégia: {strategy_name}*\n"
+                mensagem = (f"❌ Roleta Safada ❌\n\n"
+                            f"_Estratégia: {strategy_name}_\n"
                             f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
-                            f"Entrar no *{level}º Martingale*\n\n{placar_formatado}")
+                            f"➡️ Entrar no *{level}º Martingale*\n\n"
+                            f"{placar_formatado}")
                 sent_messages = await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
                 for chat_id, message in sent_messages.items():
                     if chat_id not in active_strategy_state["messages"]: active_strategy_state["messages"][chat_id] = {"martingales": []}
@@ -215,8 +222,10 @@ async def processar_numero(bot, numero):
                 await apagar_mensagens_da_jogada(bot)
                 daily_score[strategy_name]["losses"] += 1
                 placar_final_formatado = format_score_message()
-                mensagem = (f"❌ Roleta Safada ❌\n\n*Estratégia: {strategy_name}*\nLoss final no 2º Martingale.\n"
-                            f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n{placar_final_formatado}")
+                mensagem = (f"❌ Loss Final ❌\n\n"
+                            f"_Estratégia: {strategy_name}_\n"
+                            f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
+                            f"{placar_final_formatado}")
                 await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
                 active_strategy_state = {"active": False, "messages": {}}
     else:
@@ -226,9 +235,12 @@ async def processar_numero(bot, numero):
                     logging.info(f"Gatilho {numero} para '{name}' ignorado. Número anterior ({numero_anterior}) está no filtro.")
                     continue
                 winning_numbers = details["get_winners"](numero)
-                mensagem = (f"🎯 Gatilho Encontrado! 🎯\n\nEstratégia: *{name}*\nNúmero Gatilho: *{numero}*\n\n"
-                            f"Apostar em: `{', '.join(map(str, sorted(winning_numbers)))}`\n\n"
-                            f"{placar_formatado}\n\n[Fazer Aposta]({URL_APOSTA})")
+                mensagem = (f"🎯 *Gatilho Encontrado!* 🎯\n\n"
+                            f"🎲 *Estratégia: {name}*\n"
+                            f"🔢 *Número Gatilho: {numero}*\n\n"
+                            f"💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n"
+                            f"{placar_formatado}\n\n"
+                            f"[🔗 Fazer Aposta]({URL_APOSTA})")
                 sent_messages = await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
                 active_strategy_state = {"active": True, "strategy_name": name, "martingale_level": 0,
                                          "winning_numbers": winning_numbers, "trigger_number": numero, "messages": {}}
