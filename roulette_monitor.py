@@ -281,28 +281,28 @@ async def relatorio_command(update, context):
 # --- INICIALIZAÇÃO E LOOP DE MONITORAMENTO ---
 async def monitor_loop(bot):
     driver = None
-    while True:
-        # A cada novo ciclo, calcula um tempo de execução e pausa aleatórios
+    while True: # Loop externo para garantir que o bot sempre tente reiniciar
         tempo_execucao_segundos = random.randint(MIN_EXECUCAO_HORAS * 3600, MAX_EXECUCAO_HORAS * 3600)
         tempo_pausa_minutos = random.randint(MIN_PAUSA_MINUTOS, MAX_PAUSA_MINUTOS)
         tempo_pausa_segundos = tempo_pausa_minutos * 60
-        
         start_time = time.time()
+        
         try:
             driver = configurar_driver()
             if not fazer_login(driver):
                 await send_message_to_all(bot, "❌ Falha crítica no login. A tentar novamente em 1 minuto.")
-                raise Exception("O login no Padrões de Cassino falhou.")
-            
+                # Pausa antes de tentar o login novamente
+                await asyncio.sleep(60)
+                continue # Volta ao início do loop para tentar o login novamente
+
             await send_message_to_all(bot, f"✅ Bot conectado e a monitorizar!")
             
-            # Loop de monitoramento principal com duração aleatória
             while time.time() - start_time < tempo_execucao_segundos:
                 numero = buscar_ultimo_numero(driver)
                 await processar_numero(bot, numero)
                 await asyncio.sleep(INTERVALO_VERIFICACAO)
             
-            # Fim do ciclo de trabalho, inicia a pausa programada
+            # Pausa programada
             logging.info(f"Atingido o tempo de execução. A iniciar pausa de {tempo_pausa_minutos} minutos.")
             await send_message_to_all(bot, f"⏳ Pausa para revisão das estratégias. O bot voltará em aproximadamente {tempo_pausa_minutos} minutos.")
             
@@ -312,7 +312,8 @@ async def monitor_loop(bot):
         finally:
             if driver:
                 driver.quit()
-            logging.info(f"Driver do Selenium encerrado. A fazer uma pausa de {tempo_pausa_minutos} minutos.")
+                driver = None
+            logging.info(f"Ciclo encerrado. A fazer uma pausa de {tempo_pausa_minutos} minutos.")
             await asyncio.sleep(tempo_pausa_segundos)
             await send_message_to_all(bot, "⚙️ Pausa concluída. A retomar o monitoramento.")
 
