@@ -7,7 +7,7 @@ import asyncio
 import telegram
 import json
 from telegram.constants import ParseMode
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram.ext import Application, CommandHandler
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
@@ -70,8 +70,11 @@ numero_anterior = None
 # --- BANCO DE DADOS (JSON) ---
 def load_history():
     if os.path.exists(HISTORICO_FILE):
-        with open(HISTORICO_FILE, 'r') as f:
-            return json.load(f)
+        try:
+            with open(HISTORICO_FILE, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return {} # Retorna um dicionário vazio se o arquivo estiver corrompido ou vazio
     return {}
 
 def save_history(history):
@@ -183,14 +186,66 @@ async def processar_numero(bot, numero):
     global active_strategy_state, daily_score
     if numero is None: return
     await check_and_reset_daily_score(bot)
-    
-    # ... (lógica de processamento de vitória/derrota/gatilho, igual à anterior)
-    # A única mudança é que as chamadas a format_score_message já incluem a assertividade
-    # ...
+    placar_formatado = format_score_message(daily_score)
+
+    if active_strategy_state["active"]:
+        strategy_name = active_strategy_state["strategy_name"]
+        is_win = numero in active_strategy_state["winning_numbers"]
+        if is_win:
+            win_level = active_strategy_state["martingale_level"]
+            if win_level == 0:
+                daily_score[strategy_name]["wins_sg"] += 1
+                win_type_message = "Vitória sem Gale!"
+            else:
+                daily_score[strategy_name][f"wins_g{win_level}"] += 1
+                win_type_message = f"Vitória no {win_level}º Martingale"
+            placar_final_formatado = format_score_message(daily_score)
+            mensagem = (f"✅ Paga Roleta ✅\n\n"
+                        f"*{win_type_message}*\n"
+                        f"_Estratégia: {strategy_name}_\n"
+                        f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
+                        f"{placar_final_formatado}")
+            await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
+            active_strategy_state = {"active": False, "messages": {}}
+        else:
+            active_strategy_state["martingale_level"] += 1
+            level = active_strategy_state["martingale_level"]
+            if level <= 2:
+                mensagem = (f"❌ Roleta Safada ❌\n\n"
+                            f"_Estratégia: {strategy_name}_\n"
+                            f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
+                            f"➡️ Entrar no *{level}º Martingale*\n\n"
+                            f"{placar_formatado}")
+                await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
+            else:
+                daily_score[strategy_name]["losses"] += 1
+                placar_final_formatado = format_score_message(daily_score)
+                mensagem = (f"❌ Loss Final ❌\n\n"
+                            f"_Estratégia: {strategy_name}_\n"
+                            f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{numero}*\n\n"
+                            f"{placar_final_formatado}")
+                await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
+                active_strategy_state = {"active": False, "messages": {}}
+    else:
+        for name, details in ESTRATEGIAS.items():
+            if numero in details["triggers"]:
+                if details["filter"] and numero_anterior in details["filter"]:
+                    logging.info(f"Gatilho {numero} para '{name}' ignorado. Número anterior ({numero_anterior}) está no filtro.")
+                    continue
+                winning_numbers = details["get_winners"](numero)
+                mensagem = (f"🎯 *Gatilho Encontrado!* 🎯\n\n"
+                            f"🎲 *Estratégia: {name}*\n"
+                            f"🔢 *Número Gatilho: {numero}*\n\n"
+                            f"💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n"
+                            f"{placar_formatado}\n\n"
+                            f"[🔗 Fazer Aposta]({URL_APOSTA})")
+                await send_message_to_all(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
+                active_strategy_state = {"active": True, "strategy_name": name, "martingale_level": 0,
+                                         "winning_numbers": winning_numbers, "trigger_number": numero, "messages": {}}
+                break 
 
 # --- COMANDOS DO TELEGRAM ---
 async def relatorio_command(update, context):
-    """Envia um relatório de um dia específico."""
     try:
         args = context.args
         if not args:
@@ -205,7 +260,6 @@ async def relatorio_command(update, context):
             target_date = (date.today() - timedelta(days=1)).isoformat()
         else:
             try:
-                # Valida o formato da data
                 datetime.strptime(target_day_str, '%Y-%m-%d')
                 target_date = target_day_str
             except ValueError:
@@ -226,34 +280,31 @@ async def relatorio_command(update, context):
 
 # --- INICIALIZAÇÃO E LOOP DE MONITORAMENTO ---
 async def monitor_loop(bot):
-    """O loop principal que monitora a roleta."""
     driver = None
-    try:
-        driver = configurar_driver()
-        if not fazer_login(driver):
-            await send_message_to_all(bot, "❌ Falha crítica no login. O bot não pode continuar.")
-            raise Exception("O login no Padrões de Cassino falhou.")
-        
-        await send_message_to_all(bot, f"✅ Bot conectado e monitorando!")
-        
-        while True:
-            numero = buscar_ultimo_numero(driver)
-            await processar_numero(bot, numero)
-            await asyncio.sleep(INTERVALO_VERIFICACAO)
+    while True: # Adiciona um loop de reinicialização para o monitoramento
+        try:
+            driver = configurar_driver()
+            if not fazer_login(driver):
+                await send_message_to_all(bot, "❌ Falha crítica no login. A tentar novamente em 1 minuto.")
+                raise Exception("O login no Padrões de Cassino falhou.")
             
-    except Exception as e:
-        logging.error(f"Um erro crítico ocorreu no loop de monitoramento: {e}")
-        await send_message_to_all(bot, f"🚨 Erro crítico: {e}. O bot irá reiniciar em 1 minuto.")
-    finally:
-        if driver:
-            driver.quit()
-        logging.info("Driver do Selenium encerrado.")
-        await asyncio.sleep(60)
+            await send_message_to_all(bot, f"✅ Bot conectado e a monitorizar!")
+            
+            while True:
+                numero = buscar_ultimo_numero(driver)
+                await processar_numero(bot, numero)
+                await asyncio.sleep(INTERVALO_VERIFICACAO)
+                
+        except Exception as e:
+            logging.error(f"Um erro crítico ocorreu no loop de monitoramento: {e}")
+            await send_message_to_all(bot, f"🚨 Erro crítico: {e}. O bot irá reiniciar em 1 minuto.")
+        finally:
+            if driver:
+                driver.quit()
+            logging.info("Driver do Selenium encerrado. A reiniciar em 1 minuto.")
+            await asyncio.sleep(60)
 
 async def main():
-    """Configura o bot do Telegram, os comandos e inicia o loop de monitoramento."""
-    
-    # Carrega o placar do dia, se existir
     global daily_score
     history = load_history()
     today_str = date.today().isoformat()
@@ -263,22 +314,18 @@ async def main():
     else:
         daily_score = initialize_score()
 
-    # Configuração do bot com command handlers
-    application = ApplicationBuilder().token(TOKEN_BOT).build()
+    application = Application.builder().token(TOKEN_BOT).build()
     application.add_handler(CommandHandler("relatorio", relatorio_command))
     
-    # Inicia o loop de monitoramento como uma tarefa de fundo
-    asyncio.create_task(monitor_loop(application.bot))
-    
-    # Inicia o bot para ouvir os comandos
-    logging.info("Bot iniciado e a ouvir comandos...")
-    await application.run_polling()
+    # Executa o monitoramento e o bot de comandos em paralelo
+    await asyncio.gather(
+        monitor_loop(application.bot),
+        application.run_polling()
+    )
 
 if __name__ == '__main__':
-    while True:
-        try:
-            asyncio.run(main())
-        except Exception as e:
-            logging.error(f"O processo principal falhou completamente: {e}. A reiniciar em 1 minuto.")
-            time.sleep(60)
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logging.error(f"O processo principal falhou completamente: {e}.")
 
