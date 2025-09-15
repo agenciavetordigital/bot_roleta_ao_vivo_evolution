@@ -15,7 +15,6 @@ from selenium.webdriver.support import expected_conditions as EC
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_ID = os.environ.get('CHAT_ID')
-# VARIÁVEIS PARA O LOGIN NO PADRÕES DE CASSINO
 PADROES_USER = os.environ.get('PADROES_USER')
 PADROES_PASS = os.environ.get('PADROES_PASS')
 
@@ -47,9 +46,8 @@ def configurar_driver():
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    
-    # Deixa o Selenium encontrar o driver instalado pelo Dockerfile
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+
     service = ChromeService() 
     driver = webdriver.Chrome(service=service, options=chrome_options)
     logging.info("Driver do Chrome configurado com sucesso.")
@@ -74,8 +72,8 @@ def fazer_login(driver):
         login_button.click()
         logging.info("Botão de login clicado.")
         
-        wait.until(EC.url_to_be(URL_ROLETA))
-        logging.info("Login realizado com sucesso! Redirecionado para a página da roleta.")
+        wait.until(EC.url_contains("sistema"))
+        logging.info("Login realizado com sucesso! Redirecionado da página de login.")
         return True
 
     except Exception as e:
@@ -88,42 +86,38 @@ def fazer_login(driver):
         return False
 
 def buscar_ultimo_numero(driver):
-    """Busca o número mais recente da roleta."""
+    """Busca o número mais recente da roleta (com debug)."""
     global ultimo_numero_encontrado
     try:
-        # Garante que estamos na página correta
-        if "roletabrasileira" not in driver.current_url:
-            logging.info("Não estamos na página da roleta, navegando...")
+        if driver.current_url != URL_ROLETA:
             driver.get(URL_ROLETA)
         else:
             driver.refresh()
 
         wait = WebDriverWait(driver, 30)
-        
-        # Espera pelo container de "Números Recentes" estar visível
-        container_recente = wait.until(
-             EC.presence_of_element_located((By.ID, "dados"))
-        )
-        
-        # Espera pelo primeiro 'div' (que é o último número) a aparecer dentro do container
-        primeiro_numero_div = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "#dados > div:first-child"))
-        )
-        
-        numero_str = primeiro_numero_div.text.strip()
-        
-        if numero_str == ultimo_numero_encontrado:
-            return None
 
-        ultimo_numero_encontrado = numero_str
-        
-        if numero_str.isdigit():
-            numero = int(numero_str)
-            logging.info(f"Número válido encontrado: {numero}")
-            return numero
-        else:
-            logging.warning(f"Texto encontrado não é um número válido: '{numero_str}'")
-            return None
+        # Captura todos os elementos dentro de #dados
+        elementos = wait.until(
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#dados div, #dados span"))
+        )
+
+        logging.info("🔎 Debug: Elementos encontrados em #dados:")
+        for el in elementos:
+            logging.info(f"   -> '{el.text.strip()}'")
+
+        for elemento in elementos:
+            numero_str = elemento.text.strip()
+            if numero_str.isdigit() and 0 <= int(numero_str) <= 36:
+                if numero_str == ultimo_numero_encontrado:
+                    return None
+
+                ultimo_numero_encontrado = numero_str
+                numero = int(numero_str)
+                logging.info(f"✅ Número válido encontrado: {numero}")
+                return numero
+
+        logging.warning("⚠️ Nenhum número válido encontrado nos elementos capturados.")
+        return None
 
     except Exception as e:
         logging.error(f"Erro ao buscar número com Selenium: {e}")
@@ -158,7 +152,7 @@ async def main():
         bot = telegram.Bot(token=TOKEN_BOT)
         info_bot = await bot.get_me()
         logging.info(f"Bot '{info_bot.first_name}' (Padrões de Cassino) inicializado com sucesso!")
-        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' (Padrões de Cassino) conectado e monitorando!")
+        await enviar_alerta(bot, f"✅ Bot '{info_bot.first_name}' conectado e monitorando!")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram. Erro: {e}")
         return
@@ -194,4 +188,3 @@ if __name__ == '__main__':
         except Exception as e:
             logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
             time.sleep(60)
-
