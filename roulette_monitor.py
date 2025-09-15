@@ -26,15 +26,11 @@ if not all([TOKEN_BOT, CHAT_ID, PADROES_USER, PADROES_PASS]):
 
 URL_ROLETA = 'https://jv.padroesdecassino.com.br/sistema/roletabrasileira'
 URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
-INTERVALO_VERIFICACAO = 09
+INTERVALO_VERIFICACAO = 10
 
 # --- ESTRATÉGIAS DE ALERTA ---
 ESTRATEGIAS = {
-    "Estratégia Vizinhos do Zero": lambda num: num in [0, 2, 3, 4, 7, 12, 15, 18, 19, 21, 22, 25, 26, 28, 29, 32, 35],
-    "Estratégia Terceiro Final": lambda num: num % 10 in [3, 6, 9] and num not in [0],
-    "Estratégia Número 7": lambda num: num == 7,
-    "Estratégia Primeira Dúzia": lambda num: 1 <= num <= 12,
-    "Estratégia Coluna 1": lambda num: num % 3 == 1 and num != 0,
+    "Estratégia do 72 - Apostar no número gatilho e seus 9 vizinhos": lambda num: num in [2, 7, 12, 17, 22, 27, 32, 11, 16, 25, 34],
 }
 
 # --- LÓGICA DO BOT ---
@@ -191,6 +187,4 @@ if __name__ == '__main__':
         except Exception as e:
             logging.error(f"O processo principal falhou completamente: {e}. Reiniciando em 1 minuto.")
             time.sleep(60)
-
-
 
