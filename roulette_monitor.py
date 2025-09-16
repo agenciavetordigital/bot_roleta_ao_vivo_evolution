@@ -40,24 +40,44 @@ WORK_MAX_MINUTES = 5 * 60
 BREAK_MIN_MINUTES = 25
 BREAK_MAX_MINUTES = 45
 
-# --- LÓGICA DAS ESTRATÉGIAS ---
-ROULETTE_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26]
-def get_winners_72(trigger_number):
-    try:
-        index = ROULETTE_WHEEL.index(trigger_number)
-        total_numbers = len(ROULETTE_WHEEL)
-        winners = {trigger_number}
-        for i in range(1, 5): winners.add(ROULETTE_WHEEL[(index - i + total_numbers) % total_numbers])
-        for i in range(1, 5): winners.add(ROULETTE_WHEEL[(index + i) % total_numbers])
-        winners.add(0)
-        return list(winners)
-    except ValueError: return [0, trigger_number]
-def get_winners_p2(trigger_number):
-    return [0, 1, 2, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 19, 20, 23, 24, 26, 27, 28, 30, 31, 32, 34, 35]
-ESTRATEGIAS = {
-    "Estratégia menos fichas": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
-    "Estratégia 95% - Roleta": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22, 25, 29, 33, 36, 26, 27, 28, 30, 31, 32, 34, 35], "filter": [], "get_winners": get_winners_p2}
+# ##################################################
+# ### NOVA LÓGICA DE ESTRATÉGIA (EXCLUSIVA) ###
+# ##################################################
+STRATEGY_MENOS_FICHAS_NEIGHBORS = {
+    2: [15, 19, 4, 21, 2, 25, 17, 34, 6],
+    7: [9, 22, 18, 29, 7, 28, 12, 35, 3],
+    12: [18, 29, 7, 28, 12, 35, 3, 26, 0], # Zero já é vizinho
+    17: [4, 21, 2, 25, 17, 34, 6, 27, 13],
+    22: [20, 14, 31, 9, 22, 18, 29, 7, 28],
+    27: [25, 17, 34, 6, 27, 13, 36, 11, 30],
+    32: [35, 3, 26, 0, 32, 15, 19, 4, 21], # Zero já é vizinho
+    11: [6, 27, 13, 36, 11, 30, 8, 23, 10],
+    16: [23, 10, 5, 24, 16, 33, 1, 20, 14],
+    25: [19, 4, 21, 2, 25, 17, 34, 6, 27],
+    34: [21, 2, 25, 17, 34, 6, 27, 13, 36]
 }
+
+def get_winners_menos_fichas(trigger_number):
+    # Pega a lista de vizinhos baseada no gatilho
+    winners = STRATEGY_MENOS_FICHAS_NEIGHBORS.get(trigger_number, [])
+    
+    # Adiciona proteção no zero SE ele já não for um vizinho
+    if 0 not in winners:
+        winners.append(0)
+        
+    return winners
+
+ESTRATEGIAS = {
+    "Estratégia Menos Fichas": {
+        "triggers": list(STRATEGY_MENOS_FICHAS_NEIGHBORS.keys()),
+        "filter": [],
+        "get_winners": get_winners_menos_fichas
+    }
+}
+# ##################################################
+# ### FIM DA NOVA LÓGICA DE ESTRATÉGIA ###
+# ##################################################
+
 
 # --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -104,20 +124,12 @@ def fazer_login(driver):
         logging.error(f"Falha no processo de login: {e}")
         return False
 
-# ##########################################################################
-# ### FUNÇÃO 'buscar_ultimo_numero' ATUALIZADA COM EXECUÇÃO DE JAVASCRIPT ###
-# ##########################################################################
 def buscar_ultimo_numero(driver):
     global ultimos_numeros_processados, numero_anterior
     try:
-        # Espera o container de dados estar presente na página
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "dados")))
-        
-        # Executa um script JavaScript para pegar todos os números de uma vez
         js_script = "return Array.from(document.querySelectorAll('#dados div')).map(el => el.innerText.trim());"
         numeros_atuais_str = driver.execute_script(js_script)
-        
-        # Filtra para garantir que só temos números na lista
         numeros_atuais_str = [num for num in numeros_atuais_str if num.isdigit()]
 
         if not numeros_atuais_str or numeros_atuais_str == ultimos_numeros_processados:
@@ -136,7 +148,6 @@ def buscar_ultimo_numero(driver):
             return numero
             
         return None
-
     except (TimeoutException, NoSuchElementException):
         logging.warning("Elemento dos números não encontrado ou demorou para carregar.")
         return None
@@ -302,7 +313,6 @@ if __name__ == '__main__':
     try:
         asyncio.run(supervisor())
     except KeyboardInterrupt:
-        logging.info("Bot encerrado manualmente.")
+        logging.info("Bot encerrado manually.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
-
