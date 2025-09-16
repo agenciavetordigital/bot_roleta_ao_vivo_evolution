@@ -5,8 +5,8 @@ import time
 import logging
 import asyncio
 import random
-from datetime import date, datetime, timedelta
-import pytz # <-- IMPORTAÇÃO NECESSÁRIA
+from datetime import date, datetime, timedelta, time as dt_time
+import pytz
 
 import telegram
 from telegram.constants import ParseMode
@@ -36,15 +36,12 @@ INTERVALO_VERIFICACAO = 3
 MAX_MARTINGALES = 2
 
 # --- CONFIGURAÇÕES DE HUMANIZAÇÃO E HORA ---
-FUSO_HORARIO_BRASIL = pytz.timezone('America/Sao_Paulo') # <-- FUSO HORÁRIO ADICIONADO
-WORK_MIN_MINUTES = 3 * 60
-WORK_MAX_MINUTES = 5 * 60
-BREAK_MIN_MINUTES = 25
-BREAK_MAX_MINUTES = 45
-HORA_TARDE = 12
-HORA_NOITE = 18
+FUSO_HORARIO_BRASIL = pytz.timezone('America/Sao_Paulo')
+WORK_MIN_MINUTES = 3 * 60; WORK_MAX_MINUTES = 5 * 60
+BREAK_MIN_MINUTES = 25; BREAK_MAX_MINUTES = 45
+HORA_TARDE = 12; HORA_NOITE = 18
 
-# ... (Lógica das Estratégias permanece a mesma) ...
+# --- LÓGICA DAS ESTRATÉGIAS ---
 STRATEGY_MENOS_FICHAS_NEIGHBORS = { 2: [15, 19, 4, 21, 2, 25, 17, 34, 6], 7: [9, 22, 18, 29, 7, 28, 12, 35, 3], 12: [18, 29, 7, 28, 12, 35, 3, 26, 0], 17: [4, 21, 2, 25, 17, 34, 6, 27, 13], 22: [20, 14, 31, 9, 22, 18, 29, 7, 28], 27: [25, 17, 34, 6, 27, 13, 36, 11, 30], 32: [35, 3, 26, 0, 32, 15, 19, 4, 21], 11: [6, 27, 13, 36, 11, 30, 8, 23, 10], 16: [23, 10, 5, 24, 16, 33, 1, 20, 14], 25: [19, 4, 21, 2, 25, 17, 34, 6, 27], 34: [21, 2, 25, 17, 34, 6, 27, 13, 36]}
 def get_winners_menos_fichas(trigger_number):
     winners = STRATEGY_MENOS_FICHAS_NEIGHBORS.get(trigger_number, [])
@@ -56,14 +53,14 @@ ESTRATEGIAS = { "Estratégia Menos Fichas": { "triggers": list(STRATEGY_MENOS_FI
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ultimos_numeros_processados = []
 numero_anterior = None
+daily_play_history = [] # <-- NOVO: RASTREADOR DE JOGADAS DO DIA
 
-daily_messages_sent = {} # <-- NOVO DICIONÁRIO DE ESTADO
+daily_messages_sent = {}
 def reset_daily_messages_tracker():
     global daily_messages_sent
     daily_messages_sent = {"tarde": False, "noite": False}
 reset_daily_messages_tracker()
 
-# ... (initialize_score, reset_strategy_state, configurar_driver, fazer_login, etc. permanecem iguais) ...
 def initialize_score():
     score = {"last_check_date": datetime.now(FUSO_HORARIO_BRASIL).date()}
     for name in ESTRATEGIAS:
@@ -91,7 +88,6 @@ def fazer_login(driver):
     except Exception as e:
         logging.error(f"Falha no processo de login: {e}"); return False
 
-# --- FUNÇÃO 'buscar_ultimo_numero' ATUALIZADA COM EXECUÇÃO DE JAVASCRIPT ---
 def buscar_ultimo_numero(driver):
     global ultimos_numeros_processados, numero_anterior
     try:
@@ -111,10 +107,32 @@ def buscar_ultimo_numero(driver):
     except (TimeoutException, NoSuchElementException): logging.warning("Elemento dos números não encontrado ou demorou para carregar."); return None
     except Exception as e: logging.error(f"Erro inesperado ao buscar número: {e}"); return None
 
-# --- FUNÇÃO DE PLACAR MELHORADA ---
+# --- NOVA FUNÇÃO PARA CALCULAR SEQUÊNCIAS ---
+def calculate_streaks_for_period(start_time, end_time):
+    plays_in_period = [p['result'] for p in daily_play_history if start_time <= p['time'].time() < end_time]
+    
+    if not plays_in_period:
+        return {"max_wins": 0, "max_losses": 0}
+
+    max_wins, current_wins = 0, 0
+    max_losses, current_losses = 0, 0
+
+    for result in plays_in_period:
+        if result == 'win':
+            current_wins += 1
+            current_losses = 0
+        else: # loss
+            current_losses += 1
+            current_wins = 0
+        
+        if current_wins > max_wins: max_wins = current_wins
+        if current_losses > max_losses: max_losses = current_losses
+
+    return {"max_wins": max_wins, "max_losses": max_losses}
+
+# --- FUNÇÕES DE PLACAR E MENSAGENS ATUALIZADAS ---
 def format_score_message(title="📊 *Placar do Dia* 📊"):
-    messages = [title]
-    overall_wins, overall_losses = 0, 0
+    messages = [title]; overall_wins, overall_losses = 0, 0
     for name, score in daily_score.items():
         if name == "last_check_date": continue
         strategy_wins = score['wins_sg'] + score['wins_g1'] + score['wins_g2']; strategy_losses = score['losses']
@@ -127,8 +145,6 @@ def format_score_message(title="📊 *Placar do Dia* 📊"):
     overall_accuracy = (overall_wins / total_overall_plays * 100) if total_overall_plays > 0 else 0
     messages.insert(1, f"📈 *Assertividade Geral: {overall_accuracy:.1f}%*")
     return "\n\n".join(messages)
-
-# --- LÓGICA DE MENSAGENS E JOGO ---
 async def send_message_to_all(bot, text, **kwargs):
     for chat_id in CHAT_IDS:
         try: await bot.send_message(chat_id=chat_id, text=text, **kwargs)
@@ -144,59 +160,75 @@ async def edit_play_messages(bot, new_text, **kwargs):
         try: await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=new_text, **kwargs)
         except Exception as e: logging.warning(f"Não foi possível editar a msg {message_id} do chat {chat_id}: {e}")
 
-# --- FUNÇÕES DE LÓGICA DE TEMPO ATUALIZADAS ---
 async def check_and_reset_daily_score(bot):
-    global daily_score
+    global daily_score, daily_play_history
     today_br = datetime.now(FUSO_HORARIO_BRASIL).date()
     if daily_score.get("last_check_date") != today_br:
         logging.info("Novo dia detectado! Enviando relatório e resetando o placar.")
-        
-        # Gera o relatório final do dia anterior
         yesterday_str = daily_score.get("last_check_date", "dia anterior").strftime('%d/%m/%Y')
         summary_title = f"📈 *Relatório Final do Dia {yesterday_str}* 📈"
         final_scores = format_score_message(title=summary_title)
-        await send_message_to_all(bot, final_scores, parse_mode=ParseMode.MARKDOWN)
         
-        # Reseta o placar e as mensagens
+        # Calcula streaks do dia inteiro
+        streaks = calculate_streaks_for_period(dt_time.min, dt_time.max)
+        streak_report = (f"\n\n*Resumo do Dia:*\n"
+                         f"Sequência Máx. de Vitórias: *{streaks['max_wins']}* ✅\n"
+                         f"Sequência Máx. de Derrotas: *{streaks['max_losses']}* ❌")
+        
+        await send_message_to_all(bot, final_scores + streak_report, parse_mode=ParseMode.MARKDOWN)
+        
         daily_score = initialize_score()
+        daily_play_history.clear() # Limpa o histórico de jogadas
         reset_daily_messages_tracker()
         
-        # Mensagem de bom dia
         await send_message_to_all(bot, "☀️ Bom dia! Um novo dia de análises está começando. Boa sorte a todos!")
 
 async def check_and_send_period_messages(bot):
     global daily_messages_sent
     now_br = datetime.now(FUSO_HORARIO_BRASIL)
     
-    # Mensagem da tarde
     if now_br.hour >= HORA_TARDE and not daily_messages_sent.get("tarde"):
         logging.info("Enviando mensagem do período da tarde.")
-        partial_title = "📊 *Placar Parcial (Tarde)* 📊"
+        partial_title = "📊 *Placar Parcial (Manhã)* 📊"
         partial_score = format_score_message(title=partial_title)
-        message = f"☀️ Período da tarde iniciando!\n\nNossa parcial até agora é:\n{partial_score}"
+        
+        # Calcula streaks da manhã (00:00 até 11:59)
+        streaks = calculate_streaks_for_period(dt_time.min, dt_time(hour=11, minute=59, second=59))
+        streak_report = (f"\n\nSequência Máx. de Vitórias: *{streaks['max_wins']}* ✅\n"
+                         f"Sequência Máx. de Derrotas: *{streaks['max_losses']}* ❌")
+
+        message = f"☀️ Período da tarde iniciando!\n\nNossa parcial da **MANHÃ** foi:\n{partial_score}{streak_report}"
         await send_message_to_all(bot, message, parse_mode=ParseMode.MARKDOWN)
         daily_messages_sent["tarde"] = True
 
-    # Mensagem da noite
     if now_br.hour >= HORA_NOITE and not daily_messages_sent.get("noite"):
         logging.info("Enviando mensagem do período da noite.")
-        partial_title = "📊 *Placar Parcial (Noite)* 📊"
+        partial_title = "📊 *Placar Parcial (Tarde)* 📊"
         partial_score = format_score_message(title=partial_title)
-        message = f"🌙 Período da noite iniciando!\n\nNossa parcial até agora é:\n{partial_score}"
+        
+        # Calcula streaks da tarde (12:00 até 17:59)
+        streaks = calculate_streaks_for_period(dt_time(hour=12), dt_time(hour=17, minute=59, second=59))
+        streak_report = (f"\n\nSequência Máx. de Vitórias (Tarde): *{streaks['max_wins']}* ✅\n"
+                         f"Sequência Máx. de Derrotas (Tarde): *{streaks['max_losses']}* ❌")
+
+        message = f"🌙 Período da noite iniciando!\n\nNossa parcial da **TARDE** foi:\n{partial_score}{streak_report}"
         await send_message_to_all(bot, message, parse_mode=ParseMode.MARKDOWN)
         daily_messages_sent["noite"] = True
 
-# ... (Funções de jogo handle_win, handle_loss, etc. permanecem as mesmas) ...
 def build_base_signal_message():
     name = active_strategy_state['strategy_name']; numero = active_strategy_state['trigger_number']; winning_numbers = active_strategy_state['winning_numbers']
     return (f"🎯 *Gatilho Encontrado!* 🎯\n\n🎲 *Estratégia: {name}*\n🔢 *Número Gatilho: {numero}*\n\n💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n[🔗 Fazer Aposta]({URL_APOSTA})")
 async def handle_win(bot, final_number):
+    global daily_play_history
+    daily_play_history.append({'time': datetime.now(FUSO_HORario_BRASIL), 'result': 'win'})
     strategy_name = active_strategy_state["strategy_name"]; win_level = active_strategy_state["martingale_level"]
     if win_level == 0: daily_score[strategy_name]["wins_sg"] += 1; win_type_message = "Vitória sem Gale!"
     else: daily_score[strategy_name][f"wins_g{win_level}"] += 1; win_type_message = f"Vitória no {win_level}º Martingale"
     mensagem_final = (f"✅ *VITÓRIA!*\n\n*{win_type_message}*\n_Estratégia: {strategy_name}_\nGatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{final_number}*\n\n{format_score_message()}")
     await edit_play_messages(bot, mensagem_final, parse_mode=ParseMode.MARKDOWN); reset_strategy_state()
 async def handle_loss(bot, final_number):
+    global daily_play_history
+    daily_play_history.append({'time': datetime.now(FUSO_HORARIO_BRASIL), 'result': 'loss'})
     strategy_name = active_strategy_state["strategy_name"]; daily_score[strategy_name]["losses"] += 1
     mensagem_final = (f"❌ *LOSS!*\n\n_Estratégia: {strategy_name}_\nGatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{final_number}*\n\n{format_score_message()}")
     await edit_play_messages(bot, mensagem_final, parse_mode=ParseMode.MARKDOWN); reset_strategy_state()
@@ -221,11 +253,10 @@ async def check_for_new_triggers(bot, numero):
             await send_and_track_play_message(bot, mensagem, parse_mode=ParseMode.MARKDOWN); break
 async def processar_numero(bot, numero):
     if numero is None: return
-    await check_and_reset_daily_score(bot) # A verificação de reset acontece aqui
+    await check_and_reset_daily_score(bot)
     if active_strategy_state["active"]: await handle_active_strategy(bot, numero)
     else: await check_for_new_triggers(bot, numero)
 
-# --- ESTRUTURA PRINCIPAL COM SUPERVISOR ---
 async def work_session(bot):
     work_duration_minutes = random.randint(WORK_MIN_MINUTES, WORK_MAX_MINUTES)
     session_end_time = datetime.now(FUSO_HORARIO_BRASIL) + timedelta(minutes=work_duration_minutes)
@@ -236,7 +267,6 @@ async def work_session(bot):
         driver = configurar_driver()
         if not fazer_login(driver): raise Exception("O login falhou.")
         while datetime.now(FUSO_HORARIO_BRASIL) < session_end_time:
-            # Chama as duas funções de verificação de tempo no loop principal
             await check_and_send_period_messages(bot)
             numero = buscar_ultimo_numero(driver)
             await processar_numero(bot, numero)
@@ -249,10 +279,8 @@ async def work_session(bot):
 
 async def supervisor():
     bot = telegram.Bot(token=TOKEN_BOT)
-    try:
-        await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online!\nIniciando gerenciamento de ciclos.")
-    except Exception as e:
-        logging.critical(f"Não foi possível conectar ao Telegram para a mensagem inicial: {e}")
+    try: await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online!\nIniciando gerenciamento de ciclos.")
+    except Exception as e: logging.critical(f"Não foi possível conectar ao Telegram para a mensagem inicial: {e}")
     while True:
         try:
             await work_session(bot)
