@@ -34,7 +34,7 @@ URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
 INTERVALO_VERIFICACAO = 3
 MAX_MARTINGALES = 2
 
-# --- CONFIGURAções DE HUMANIZAÇÃO (CICLOS)---
+# --- CONFIGURAÇÕES DE HUMANIZAÇÃO (CICLOS)---
 WORK_MIN_MINUTES = 3 * 60
 WORK_MAX_MINUTES = 5 * 60
 BREAK_MIN_MINUTES = 25
@@ -104,61 +104,69 @@ def fazer_login(driver):
         logging.error(f"Falha no processo de login: {e}")
         return False
 
+# ##########################################################################
+# ### FUNÇÃO 'buscar_ultimo_numero' ATUALIZADA COM LÓGICA DE RETENTATIVAS ###
+# ##########################################################################
 def buscar_ultimo_numero(driver):
     global ultimos_numeros_processados, numero_anterior
-    try:
-        wait = WebDriverWait(driver, 10)
-        container_recente = wait.until(EC.presence_of_element_located((By.ID, "dados")))
-        divs_numeros = container_recente.find_elements(By.CSS_SELECTOR, "div")
-        numeros_atuais_str = [div.text.strip() for div in divs_numeros if div.text.strip().isdigit()]
-        if not numeros_atuais_str or numeros_atuais_str == ultimos_numeros_processados:
+    
+    # Tenta ler os números até 3 vezes antes de desistir no ciclo atual
+    for attempt in range(3):
+        try:
+            wait = WebDriverWait(driver, 10)
+            container_recente = wait.until(EC.presence_of_element_located((By.ID, "dados")))
+            divs_numeros = container_recente.find_elements(By.CSS_SELECTOR, "div")
+            numeros_atuais_str = [div.text.strip() for div in divs_numeros if div.text.strip().isdigit()]
+            
+            if not numeros_atuais_str or numeros_atuais_str == ultimos_numeros_processados:
+                return None
+            
+            novo_numero_str = numeros_atuais_str[-1]
+            if len(ultimos_numeros_processados) > 0:
+                numero_anterior_str = ultimos_numeros_processados[-1]
+                if numero_anterior_str.isdigit():
+                    numero_anterior = int(numero_anterior_str)
+            
+            ultimos_numeros_processados = numeros_atuais_str
+            if novo_numero_str.isdigit():
+                numero = int(novo_numero_str)
+                logging.info(f"✅ Novo giro detectado: {numero} (Anterior: {numero_anterior})")
+                return numero # Sucesso! Retorna o número e sai da função.
+            
             return None
-        novo_numero_str = numeros_atuais_str[-1]
-        if len(ultimos_numeros_processados) > 0:
-            numero_anterior_str = ultimos_numeros_processados[-1]
-            if numero_anterior_str.isdigit():
-                numero_anterior = int(numero_anterior_str)
-        ultimos_numeros_processados = numeros_atuais_str
-        if novo_numero_str.isdigit():
-            numero = int(novo_numero_str)
-            logging.info(f"✅ Novo giro detectado: {numero} (Anterior: {numero_anterior})")
-            return numero
-        return None
-    except StaleElementReferenceException:
-        logging.warning("Elemento 'stale' detectado. A página atualizou durante a leitura. Tentando novamente no próximo ciclo.")
-        return None
-    except (TimeoutException, NoSuchElementException):
-        logging.warning("Elemento dos números não encontrado ou demorou para carregar.")
-        return None
-    except Exception as e:
-        logging.error(f"Erro inesperado ao buscar número: {e}")
-        return None
+        
+        except StaleElementReferenceException:
+            logging.warning(f"Elemento 'stale' (tentativa {attempt + 1}/3). A página atualizou. Retentando em 0.5s...")
+            time.sleep(0.5) # Pequena pausa antes de tentar novamente
+            continue # Vai para a próxima tentativa no loop 'for'
+        
+        except (TimeoutException, NoSuchElementException):
+            logging.warning("Elemento dos números não encontrado ou demorou para carregar.")
+            return None
+        
+        except Exception as e:
+            logging.error(f"Erro inesperado ao buscar número: {e}")
+            return None
 
-# --- FUNÇÃO DE PLACAR MELHORADA ---
+    logging.warning("Não foi possível ler os números após 3 tentativas. A página está muito dinâmica. Tentando novamente no próximo ciclo.")
+    return None
+
 def format_score_message():
     messages = ["📊 *Placar do Dia* 📊"]
-    overall_wins = 0
-    overall_losses = 0
-
+    overall_wins, overall_losses = 0, 0
     for name, score in daily_score.items():
-        if name == "last_check_date":
-            continue
-        
+        if name == "last_check_date": continue
         strategy_wins = score['wins_sg'] + score['wins_g1'] + score['wins_g2']
         strategy_losses = score['losses']
         overall_wins += strategy_wins
         overall_losses += strategy_losses
-        
         total_plays = strategy_wins + strategy_losses
         accuracy = (strategy_wins / total_plays * 100) if total_plays > 0 else 0
-        
         wins_str = f"SG: {score['wins_sg']} | G1: {score['wins_g1']} | G2: {score['wins_g2']}"
         messages.append(f"*{name}* (Assertividade: {accuracy:.1f}%)\n`   `✅ `{wins_str}`\n`   `❌ `{strategy_losses}`")
-
     total_overall_plays = overall_wins + overall_losses
     overall_accuracy = (overall_wins / total_overall_plays * 100) if total_overall_plays > 0 else 0
     messages.insert(1, f"📈 *Assertividade Geral: {overall_accuracy:.1f}%*")
-    
     return "\n\n".join(messages)
 
 async def send_message_to_all(bot, text, **kwargs):
@@ -166,12 +174,11 @@ async def send_message_to_all(bot, text, **kwargs):
     for chat_id in CHAT_IDS:
         try:
             message = await bot.send_message(chat_id=chat_id, text=text, **kwargs)
-            sent_messages[chat_id] = message # Retorna o objeto da mensagem
+            sent_messages[chat_id] = message
         except Exception as e:
             logging.error(f"Erro ao enviar mensagem para o chat_id {chat_id}: {e}")
     return sent_messages
 
-# --- NOVAS FUNÇÕES DE GERENCIAMENTO DE MENSAGENS ---
 async def send_and_track_play_message(bot, text, **kwargs):
     sent_messages = await send_message_to_all(bot, text, **kwargs)
     for chat_id, message in sent_messages.items():
@@ -195,19 +202,15 @@ async def check_and_reset_daily_score(bot):
         daily_score = initialize_score()
         await send_message_to_all(bot, "Placar diário zerado. Bom dia e boas apostas!")
 
-# --- FUNÇÕES DE LÓGICA DE JOGO ATUALIZADAS PARA EDITAR MENSAGENS ---
 def build_base_signal_message():
-    """Cria o texto base da mensagem de sinal para ser reutilizado."""
     name = active_strategy_state['strategy_name']
     numero = active_strategy_state['trigger_number']
     winning_numbers = active_strategy_state['winning_numbers']
-    return (
-        f"🎯 *Gatilho Encontrado!* 🎯\n\n"
-        f"🎲 *Estratégia: {name}*\n"
-        f"🔢 *Número Gatilho: {numero}*\n\n"
-        f"💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n"
-        f"[🔗 Fazer Aposta]({URL_APOSTA})"
-    )
+    return (f"🎯 *Gatilho Encontrado!* 🎯\n\n"
+            f"🎲 *Estratégia: {name}*\n"
+            f"🔢 *Número Gatilho: {numero}*\n\n"
+            f"💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n"
+            f"[🔗 Fazer Aposta]({URL_APOSTA})")
 
 async def handle_win(bot, final_number):
     strategy_name = active_strategy_state["strategy_name"]
@@ -216,39 +219,25 @@ async def handle_win(bot, final_number):
         daily_score[strategy_name]["wins_sg"] += 1; win_type_message = "Vitória sem Gale!"
     else:
         daily_score[strategy_name][f"wins_g{win_level}"] += 1; win_type_message = f"Vitória no {win_level}º Martingale"
-    
-    mensagem_final = (f"✅ *VITÓRIA!*\n\n"
-                      f"*{win_type_message}*\n"
-                      f"_Estratégia: {strategy_name}_\n"
-                      f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{final_number}*\n\n"
-                      f"{format_score_message()}")
-    
+    mensagem_final = (f"✅ *VITÓRIA!*\n\n*{win_type_message}*\n_Estratégia: {strategy_name}_\n"
+                      f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{final_number}*\n\n{format_score_message()}")
     await edit_play_messages(bot, mensagem_final, parse_mode=ParseMode.MARKDOWN)
     reset_strategy_state()
 
 async def handle_loss(bot, final_number):
     strategy_name = active_strategy_state["strategy_name"]
     daily_score[strategy_name]["losses"] += 1
-    
-    mensagem_final = (f"❌ *LOSS!*\n\n"
-                      f"_Estratégia: {strategy_name}_\n"
-                      f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{final_number}*\n\n"
-                      f"{format_score_message()}")
-    
+    mensagem_final = (f"❌ *LOSS!*\n\n_Estratégia: {strategy_name}_\n"
+                      f"Gatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{final_number}*\n\n{format_score_message()}")
     await edit_play_messages(bot, mensagem_final, parse_mode=ParseMode.MARKDOWN)
     reset_strategy_state()
 
 async def handle_martingale(bot, current_number):
     level = active_strategy_state["martingale_level"]
     base_message = build_base_signal_message()
-    
-    mensagem_editada = (
-        f"{base_message}\n\n"
-        f"------------------------------------\n"
-        f"⏳ *Análise: Entrar no {level}º Martingale...*\n"
-        f"O número *{current_number}* não pagou."
-    )
-    
+    mensagem_editada = (f"{base_message}\n\n------------------------------------\n"
+                        f"⏳ *Análise: Entrar no {level}º Martingale...*\n"
+                        f"O número *{current_number}* não pagou.")
     await edit_play_messages(bot, mensagem_editada, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_active_strategy(bot, numero):
@@ -264,11 +253,8 @@ async def check_for_new_triggers(bot, numero):
             if details.get("filter") and numero_anterior is not None and numero_anterior in details["filter"]:
                 logging.info(f"Gatilho {numero} ignorado para '{name}' devido ao filtro com número anterior {numero_anterior}.")
                 continue
-            
             winning_numbers = details["get_winners"](numero)
-            # Atualiza o estado ANTES de construir a mensagem
             active_strategy_state.update({ "active": True, "strategy_name": name, "winning_numbers": winning_numbers, "trigger_number": numero })
-            
             mensagem = f"{build_base_signal_message()}\n\n---\n{format_score_message()}"
             await send_and_track_play_message(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
             break
@@ -279,7 +265,6 @@ async def processar_numero(bot, numero):
     if active_strategy_state["active"]: await handle_active_strategy(bot, numero)
     else: await check_for_new_triggers(bot, numero)
 
-# --- ESTRUTURA PRINCIPAL COM SUPERVISOR ---
 async def work_session(bot):
     work_duration_minutes = random.randint(WORK_MIN_MINUTES, WORK_MAX_MINUTES)
     session_end_time = datetime.now() + timedelta(minutes=work_duration_minutes)
@@ -288,8 +273,7 @@ async def work_session(bot):
     driver = None
     try:
         driver = configurar_driver()
-        if not fazer_login(driver):
-            raise Exception("O login falhou.")
+        if not fazer_login(driver): raise Exception("O login falhou.")
         while datetime.now() < session_end_time:
             numero = buscar_ultimo_numero(driver)
             await processar_numero(bot, numero)
