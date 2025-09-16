@@ -14,7 +14,7 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
@@ -105,51 +105,44 @@ def fazer_login(driver):
         return False
 
 # ##########################################################################
-# ### FUNÇÃO 'buscar_ultimo_numero' ATUALIZADA COM LÓGICA DE RETENTATIVAS ###
+# ### FUNÇÃO 'buscar_ultimo_numero' ATUALIZADA COM EXECUÇÃO DE JAVASCRIPT ###
 # ##########################################################################
 def buscar_ultimo_numero(driver):
     global ultimos_numeros_processados, numero_anterior
-    
-    # Tenta ler os números até 3 vezes antes de desistir no ciclo atual
-    for attempt in range(3):
-        try:
-            wait = WebDriverWait(driver, 10)
-            container_recente = wait.until(EC.presence_of_element_located((By.ID, "dados")))
-            divs_numeros = container_recente.find_elements(By.CSS_SELECTOR, "div")
-            numeros_atuais_str = [div.text.strip() for div in divs_numeros if div.text.strip().isdigit()]
-            
-            if not numeros_atuais_str or numeros_atuais_str == ultimos_numeros_processados:
-                return None
-            
-            novo_numero_str = numeros_atuais_str[-1]
-            if len(ultimos_numeros_processados) > 0:
-                numero_anterior_str = ultimos_numeros_processados[-1]
-                if numero_anterior_str.isdigit():
-                    numero_anterior = int(numero_anterior_str)
-            
-            ultimos_numeros_processados = numeros_atuais_str
-            if novo_numero_str.isdigit():
-                numero = int(novo_numero_str)
-                logging.info(f"✅ Novo giro detectado: {numero} (Anterior: {numero_anterior})")
-                return numero # Sucesso! Retorna o número e sai da função.
-            
-            return None
+    try:
+        # Espera o container de dados estar presente na página
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "dados")))
         
-        except StaleElementReferenceException:
-            logging.warning(f"Elemento 'stale' (tentativa {attempt + 1}/3). A página atualizou. Retentando em 0.5s...")
-            time.sleep(0.5) # Pequena pausa antes de tentar novamente
-            continue # Vai para a próxima tentativa no loop 'for'
+        # Executa um script JavaScript para pegar todos os números de uma vez
+        js_script = "return Array.from(document.querySelectorAll('#dados div')).map(el => el.innerText.trim());"
+        numeros_atuais_str = driver.execute_script(js_script)
         
-        except (TimeoutException, NoSuchElementException):
-            logging.warning("Elemento dos números não encontrado ou demorou para carregar.")
-            return None
-        
-        except Exception as e:
-            logging.error(f"Erro inesperado ao buscar número: {e}")
-            return None
+        # Filtra para garantir que só temos números na lista
+        numeros_atuais_str = [num for num in numeros_atuais_str if num.isdigit()]
 
-    logging.warning("Não foi possível ler os números após 3 tentativas. A página está muito dinâmica. Tentando novamente no próximo ciclo.")
-    return None
+        if not numeros_atuais_str or numeros_atuais_str == ultimos_numeros_processados:
+            return None
+        
+        novo_numero_str = numeros_atuais_str[-1]
+        if len(ultimos_numeros_processados) > 0:
+            numero_anterior_str = ultimos_numeros_processados[-1]
+            if numero_anterior_str.isdigit():
+                numero_anterior = int(numero_anterior_str)
+        
+        ultimos_numeros_processados = numeros_atuais_str
+        if novo_numero_str.isdigit():
+            numero = int(novo_numero_str)
+            logging.info(f"✅ Novo giro detectado: {numero} (Anterior: {numero_anterior})")
+            return numero
+            
+        return None
+
+    except (TimeoutException, NoSuchElementException):
+        logging.warning("Elemento dos números não encontrado ou demorou para carregar.")
+        return None
+    except Exception as e:
+        logging.error(f"Erro inesperado ao buscar número: {e}")
+        return None
 
 def format_score_message():
     messages = ["📊 *Placar do Dia* 📊"]
