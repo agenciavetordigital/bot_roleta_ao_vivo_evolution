@@ -55,8 +55,8 @@ def get_winners_72(trigger_number):
 def get_winners_p2(trigger_number):
     return [0, 1, 2, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 19, 20, 23, 24, 26, 27, 28, 30, 31, 32, 34, 35]
 ESTRATEGIAS = {
-    "Estratégia do 72": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
-    "Estratégia P2 - Roleta": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22, 25, 29, 33, 36, 26, 27, 28, 30, 31, 32, 34, 35], "filter": [], "get_winners": get_winners_p2}
+    "Estratégia menos fichas": {"triggers": [2, 12, 17, 16], "filter": [], "get_winners": get_winners_72},
+    "Estratégia 95% - Roleta": {"triggers": [3, 4, 7, 11, 15, 18, 21, 22, 25, 29, 33, 36, 26, 27, 28, 30, 31, 32, 34, 35], "filter": [], "get_winners": get_winners_p2}
 }
 
 # --- LÓGICA DO BOT ---
@@ -305,3 +305,4 @@ if __name__ == '__main__':
         logging.info("Bot encerrado manualmente.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
+
