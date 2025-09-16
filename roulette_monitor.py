@@ -34,16 +34,14 @@ URL_LOGIN = 'https://jv.padroesdecassino.com.br/sistema/login'
 INTERVALO_VERIFICACAO = 3
 MAX_MARTINGALES = 2
 
-# --- CONFIGURAÇÕES DE HUMANIZAÇÃO (CICLOS)--- ### NOVO ###
+# --- CONFIGURAÇÕES DE HUMANIZAÇÃO (CICLOS)---
 WORK_MIN_MINUTES = 3 * 60  # 3 horas
 WORK_MAX_MINUTES = 5 * 60  # 5 horas
 BREAK_MIN_MINUTES = 25     # 25 minutos
 BREAK_MAX_MINUTES = 45     # 45 minutos
-### FIM NOVO ###
 
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
-# (Esta seção continua a mesma, sem alterações)
 ROULETTE_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26]
 def get_winners_72(trigger_number):
     try:
@@ -64,8 +62,6 @@ ESTRATEGIAS = {
 
 
 # --- LÓGICA DO BOT ---
-# (As funções de lógica do bot, como placar, estado, selenium, telegram, etc.,
-# continuam as mesmas da versão refatorada anterior. Cole-as aqui.)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ultimo_numero_processado = None
 numero_anterior = None
@@ -88,7 +84,7 @@ def configurar_driver():
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-dev-sh-usage")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     service = ChromeService()
     driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -231,15 +227,13 @@ async def processar_numero(bot, numero):
 
 
 # --- EXECUÇÃO PRINCIPAL (representa uma SESSÃO DE TRABALHO) ---
-async def main():
-    bot = telegram.Bot(token=TOKEN_BOT)
-
-    # --- LÓGICA DA SESSÃO DE TRABALHO --- ### NOVO ###
+async def main(bot):
     work_duration_minutes = random.randint(WORK_MIN_MINUTES, WORK_MAX_MINUTES)
     session_end_time = datetime.now() + timedelta(minutes=work_duration_minutes)
     
     logging.info(f"Iniciando uma nova sessão de trabalho que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
-    await send_message_to_all(bot, f"☀️ *Sessão de trabalho iniciada!*\nO bot ficará ativo por aproximadamente *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
+    # MENSAGEM DE INÍCIO DE TRABALHO (ALTERADA)
+    await send_message_to_all(bot, f"Monitoramento de ciclos previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
     
     driver = None
     try:
@@ -252,9 +246,7 @@ async def main():
             await processar_numero(bot, numero)
             await asyncio.sleep(INTERVALO_VERIFICACAO)
         
-        # Fim do loop de trabalho
         logging.info("Sessão de trabalho concluída. Preparando para a pausa.")
-        await send_message_to_all(bot, "⏱️ Sessão de trabalho finalizada. O bot entrará em pausa para um café. ☕", parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
         logging.error(f"Um erro crítico ocorreu na sessão de trabalho: {e}")
@@ -266,23 +258,29 @@ async def main():
 
 # --- SUPERVISOR (gerencia os ciclos de TRABALHO e PAUSA) ---
 if __name__ == '__main__':
-    # Mensagem de inicialização única
+    bot = telegram.Bot(token=TOKEN_BOT)
     try:
-        bot = telegram.Bot(token=TOKEN_BOT)
-        asyncio.run(send_message_to_all(bot, f"✅ Bot supervisor iniciado com sucesso! Gerenciando ciclos de trabalho e pausa."))
+        # MENSAGEM DE INICIALIZAÇÃO (ALTERADA)
+        asyncio.run(send_message_to_all(bot, f"🤖 Monitoramento Roleta Online!\nIniciando gerenciamento de ciclos."))
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram para a mensagem inicial: {e}")
 
     while True:
         try:
             # Executa uma sessão de trabalho completa
-            asyncio.run(main()) 
+            asyncio.run(main(bot)) 
 
             # Lógica da Pausa
             break_duration_minutes = random.randint(BREAK_MIN_MINUTES, BREAK_MAX_MINUTES)
             logging.info(f"Iniciando pausa de {break_duration_minutes} minutos.")
+            # MENSAGEM DE INÍCIO DE PAUSA (ADICIONADA)
+            asyncio.run(send_message_to_all(bot, f"⏸️ Pausa programada para manutenção das estratégias.\nDuração: *{break_duration_minutes} minutos*.", parse_mode=ParseMode.MARKDOWN))
+
             time.sleep(break_duration_minutes * 60)
+            
             logging.info("Pausa finalizada. Iniciando nova sessão de trabalho.")
+            # MENSAGEM DE FIM DE PAUSA (ADICIONADA)
+            asyncio.run(send_message_to_all(bot, f"✅ Estratégias atualizadas, sistema operante novamente!"))
 
         except Exception as e:
             logging.critical(f"O processo supervisor falhou: {e}. Reiniciando o ciclo em 60 segundos.")
