@@ -125,24 +125,14 @@ reset_strategy_state()
 def buscar_ultimo_numero_api():
     global ultimo_numero_processado_api, numero_anterior_estrategia
     try:
-        # Log para sabermos o estado antes da chamada
-        logging.info(f"[DEBUG] Iniciando busca. Estado atual: ultimo_numero_processado_api = {ultimo_numero_processado_api}")
-
         cache_buster = int(time.time() * 1000)
         url = f"https://api.jogosvirtual.com/jsons/historico_roletabrasileira.json?_={cache_buster}"
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         dados = response.json()
 
-        # --- LOG DE DEPURAÇÃO MAIS IMPORTANTE ---
-        # Vamos imprimir exatamente o que a API nos retornou
-        logging.info(f"[DEBUG] Dados brutos recebidos da API: {dados}")
-        
-        if not dados:
-            return None, None
-
         lista_de_numeros = dados.get('baralhos', {}).get('0', [])
-        
+
         if not lista_de_numeros:
             return None, None
 
