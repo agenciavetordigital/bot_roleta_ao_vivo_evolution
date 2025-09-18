@@ -13,16 +13,15 @@ import telegram
 from telegram.constants import ParseMode
 import psycopg2
 from urllib.parse import urlparse
-import traceback # <-- IMPORTAÇÃO PARA DEPURAÇÃO DETALHADA
 
-# --- CONFIGURAÇÕES ESSENCIAIS (Simplificado sem Selenium) ---
+# --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_IDS_STR = os.environ.get('CHAT_ID')
-URL_APosta = os.environ.get('URL_APOSTA')
+URL_APOSTA = os.environ.get('URL_APOSTA')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # Validação crítica das variáveis de ambiente
-if not all([TOKEN_BOT, CHAT_IDS_STR, URL_APosta, DATABASE_URL]):
+if not all([TOKEN_BOT, CHAT_IDS_STR, URL_APOSTA, DATABASE_URL]):
     logging.critical("ERRO: Todas as variáveis de ambiente devem ser definidas: TOKEN_BOT, CHAT_ID, URL_APOSTA, DATABASE_URL!")
     exit()
 
@@ -132,9 +131,13 @@ def buscar_ultimo_numero_api():
         response.raise_for_status()
         dados = response.json()
         if not dados:
-            logging.warning("API retornou uma lista vazia.")
+            logging.warning("API retornou uma resposta vazia.")
             return None, None
-        novo_numero = int(dados[0])
+        
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Acessamos a chave de texto "0" em vez do índice numérico 0.
+        novo_numero = int(dados["0"])
+        
         if novo_numero != ultimo_numero_processado_api:
             logging.info(f"✅ Novo giro detectado via API: {novo_numero} (Anterior: {ultimo_numero_processado_api})")
             numero_anterior_estrategia = ultimo_numero_processado_api
@@ -144,8 +147,8 @@ def buscar_ultimo_numero_api():
     except requests.exceptions.RequestException as e:
         logging.error(f"Erro ao fazer requisição para a API: {e}")
         return None, None
-    except (ValueError, IndexError) as e:
-        logging.error(f"Erro ao processar os dados da API: {e}")
+    except (ValueError, KeyError, IndexError) as e:
+        logging.error(f"Erro ao processar os dados da API (JSON pode ter mudado): {e}")
         return None, None
 
 async def processar_numero(bot, numero, numero_anterior):
@@ -240,7 +243,7 @@ async def check_and_send_period_messages(bot):
 
 def build_base_signal_message():
     name = active_strategy_state['strategy_name']; numero = active_strategy_state['trigger_number']; winning_numbers = active_strategy_state['winning_numbers']
-    return (f"🎯 *Gatilho Encontrado!* 🎯\n\n🎲 *Estratégia: {name}*\n🔢 *Número Gatilho: {numero}*\n\n💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n[🔗 Fazer Aposta]({URL_APosta})")
+    return (f"🎯 *Gatilho Encontrado!* 🎯\n\n🎲 *Estratégia: {name}*\n🔢 *Número Gatilho: {numero}*\n\n💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n[🔗 Fazer Aposta]({URL_APOSTA})")
 
 async def handle_win(bot, final_number):
     daily_play_history.append({'time': datetime.now(FUSO_HORARIO_BRASIL), 'result': 'win'})
@@ -285,21 +288,11 @@ async def work_session(bot):
     session_end_time = datetime.now(FUSO_HORARIO_BRASIL) + timedelta(minutes=work_duration_minutes)
     logging.info(f"Iniciando nova sessão de trabalho (API) que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
     await send_message_to_all(bot, f"Monitoramento de ciclos (API) previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
-
     while datetime.now(FUSO_HORARIO_BRASIL) < session_end_time:
-        # LOGS DE DEPURAÇÃO ADICIONADOS
-        logging.info("Iniciando iteração do loop de trabalho...")
         await check_and_send_period_messages(bot)
-        
-        logging.info("Buscando número da API...")
         numero, numero_anterior = buscar_ultimo_numero_api()
-        logging.info(f"API retornou: numero={numero}, anterior={numero_anterior}. Processando...")
-        
         await processar_numero(bot, numero, numero_anterior)
-        
-        logging.info("Processamento concluído. Aguardando próximo ciclo...")
         await asyncio.sleep(INTERVALO_VERIFICACAO_API)
-        
     logging.info("Sessão de trabalho (API) concluída. Preparando para a pausa.")
 
 async def supervisor():
@@ -308,7 +301,6 @@ async def supervisor():
         await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online (API Mode)!\nIniciando gerenciamento de ciclos.")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram para a mensagem inicial: {e}")
-    
     while True:
         try:
             await work_session(bot)
@@ -319,7 +311,7 @@ async def supervisor():
             logging.info("Pausa finalizada. Iniciando nova sessão de trabalho.")
             await send_message_to_all(bot, f"✅ Sistema operante novamente!")
         except Exception as e:
-            # BLOCO DE EXCEÇÃO MODIFICADO PARA DEPURAÇÃO
+            import traceback
             tb_str = traceback.format_exc()
             logging.critical(f"O processo supervisor falhou! Erro: {e}\nTraceback:\n{tb_str}")
             logging.critical("Reiniciando o ciclo em 60 segundos.")
