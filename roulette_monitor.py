@@ -142,10 +142,14 @@ def buscar_ultimo_numero_api():
             return None, None
 
         lista_de_numeros = dados.get('baralhos', {}).get('0', [])
-        if not lista_de_numeros: return None, None
+        
+        if not lista_de_numeros:
+            return None, None
+
         valor_bruto = lista_de_numeros[0]
         
-        if valor_bruto is None: return None, None
+        if valor_bruto is None:
+            return None, None
         
         try:
             novo_numero = int(valor_bruto)
@@ -175,7 +179,6 @@ async def processar_numero(bot, numero, numero_anterior):
     else:
         await check_for_new_triggers(bot, numero, numero_anterior)
 
-# (O restante do código é idêntico e não precisa de alterações)
 def calculate_streaks_for_period(start_time, end_time):
     plays_in_period = [p['result'] for p in daily_play_history if start_time <= p['time'].time() < end_time]
     if not plays_in_period: return {"max_wins": 0, "max_losses": 0}
@@ -341,4 +344,3 @@ if __name__ == '__main__':
         logging.info("Bot encerrado manualmente.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
-
