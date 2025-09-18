@@ -130,25 +130,34 @@ def buscar_ultimo_numero_api():
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         dados = response.json()
+        
         if not dados:
             logging.warning("API retornou uma resposta vazia.")
             return None, None
-        
-        # --- CORREÇÃO APLICADA AQUI ---
-        # Acessamos a chave de texto "0" em vez do índice numérico 0.
-        novo_numero = int(dados["0"])
-        
+
+        valor_bruto = dados.get("0") # Usamos .get() para evitar KeyError se a chave "0" não existir
+
+        # --- CORREÇÃO FINAL APLICADA AQUI ---
+        try:
+            # Tentamos converter o valor para um número.
+            novo_numero = int(valor_bruto)
+        except (ValueError, TypeError):
+            # Se falhar (ex: o valor é "Girando..."), não é um erro.
+            # Apenas significa que não há um novo número ainda. Retornamos None.
+            return None, None
+            
         if novo_numero != ultimo_numero_processado_api:
             logging.info(f"✅ Novo giro detectado via API: {novo_numero} (Anterior: {ultimo_numero_processado_api})")
             numero_anterior_estrategia = ultimo_numero_processado_api
             ultimo_numero_processado_api = novo_numero
             return novo_numero, numero_anterior_estrategia
+            
         return None, None
     except requests.exceptions.RequestException as e:
         logging.error(f"Erro ao fazer requisição para a API: {e}")
         return None, None
-    except (ValueError, KeyError, IndexError) as e:
-        logging.error(f"Erro ao processar os dados da API (JSON pode ter mudado): {e}")
+    except Exception as e:
+        logging.error(f"Erro inesperado em buscar_ultimo_numero_api: {e}")
         return None, None
 
 async def processar_numero(bot, numero, numero_anterior):
@@ -160,6 +169,7 @@ async def processar_numero(bot, numero, numero_anterior):
     else:
         await check_for_new_triggers(bot, numero, numero_anterior)
 
+# (O restante do código é idêntico ao anterior e não precisa de alterações)
 def calculate_streaks_for_period(start_time, end_time):
     plays_in_period = [p['result'] for p in daily_play_history if start_time <= p['time'].time() < end_time]
     if not plays_in_period: return {"max_wins": 0, "max_losses": 0}
@@ -314,7 +324,6 @@ async def supervisor():
             import traceback
             tb_str = traceback.format_exc()
             logging.critical(f"O processo supervisor falhou! Erro: {e}\nTraceback:\n{tb_str}")
-            logging.critical("Reiniciando o ciclo em 60 segundos.")
             await asyncio.sleep(60)
 
 if __name__ == '__main__':
