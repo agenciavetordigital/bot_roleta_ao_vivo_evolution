@@ -125,31 +125,33 @@ reset_strategy_state()
 def buscar_ultimo_numero_api():
     global ultimo_numero_processado_api, numero_anterior_estrategia
     try:
+        # Log para sabermos o estado antes da chamada
+        logging.info(f"[DEBUG] Iniciando busca. Estado atual: ultimo_numero_processado_api = {ultimo_numero_processado_api}")
+
         cache_buster = int(time.time() * 1000)
         url = f"https://api.jogosvirtual.com/jsons/historico_roletabrasileira.json?_={cache_buster}"
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         dados = response.json()
 
-        # --- CORREÇÃO DEFINITIVA DA LÓGICA DE EXTRAÇÃO ---
-        # Navegamos pela estrutura aninhada para encontrar a lista de números.
-        # Usamos .get() com valores padrão para evitar erros se a estrutura mudar.
-        lista_de_numeros = dados.get('baralhos', {}).get('0', [])
-
-        if not lista_de_numeros:
+        # --- LOG DE DEPURAÇÃO MAIS IMPORTANTE ---
+        # Vamos imprimir exatamente o que a API nos retornou
+        logging.info(f"[DEBUG] Dados brutos recebidos da API: {dados}")
+        
+        if not dados:
             return None, None
 
-        # O número mais recente é o primeiro item da lista.
+        lista_de_numeros = dados.get('baralhos', {}).get('0', [])
+        if not lista_de_numeros: return None, None
         valor_bruto = lista_de_numeros[0]
         
-        if valor_bruto is None:
-            return None, None
+        if valor_bruto is None: return None, None
         
         try:
             novo_numero = int(valor_bruto)
         except (ValueError, TypeError):
             return None, None
-        
+            
         if novo_numero != ultimo_numero_processado_api:
             logging.info(f"✅ Novo giro detectado via API: {novo_numero} (Anterior: {ultimo_numero_processado_api})")
             numero_anterior_estrategia = ultimo_numero_processado_api
@@ -339,3 +341,4 @@ if __name__ == '__main__':
         logging.info("Bot encerrado manualmente.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
+
