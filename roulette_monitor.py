@@ -125,43 +125,35 @@ reset_strategy_state()
 def buscar_ultimo_numero_api():
     global ultimo_numero_processado_api, numero_anterior_estrategia
     try:
-        # --- LOG DE DEPURAÇÃO ADICIONADO ---
-        logging.info(f"[DEBUG] Iniciando busca. Estado atual: ultimo_numero_processado_api = {ultimo_numero_processado_api}")
-
         cache_buster = int(time.time() * 1000)
         url = f"https://api.jogosvirtual.com/jsons/historico_roletabrasileira.json?_={cache_buster}"
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         dados = response.json()
-        
+
         if not dados:
-            logging.warning("API retornou uma resposta vazia.")
             return None, None
 
         valor_bruto = dados.get("0")
+
+        # --- CORREÇÃO FINAL E DEFINITIVA ---
+        # Primeiro, verificamos se o valor é None, que é o que a API retorna entre os giros.
+        if valor_bruto is None:
+            return None, None # Se for None, apenas ignoramos e esperamos a próxima verificação.
         
+        # Só então tentamos converter para número.
         try:
             novo_numero = int(valor_bruto)
-            # --- LOG DE DEPURAÇÃO ADICIONADO ---
-            logging.info(f"[DEBUG] API retornou: {novo_numero}. Comparando com {ultimo_numero_processado_api}.")
-
         except (ValueError, TypeError):
-            # Se o valor não for um número (ex: "Girando..."), registramos e ignoramos.
-            logging.info(f"[DEBUG] API retornou valor não numérico: '{valor_bruto}'. Ignorando.")
+            # Caso a API retorne algo inesperado que não seja número (ex: "Aguarde")
             return None, None
-            
+        
         if novo_numero != ultimo_numero_processado_api:
             logging.info(f"✅ Novo giro detectado via API: {novo_numero} (Anterior: {ultimo_numero_processado_api})")
             numero_anterior_estrategia = ultimo_numero_processado_api
             ultimo_numero_processado_api = novo_numero
             return novo_numero, numero_anterior_estrategia
-            
-        return None, None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Erro ao fazer requisição para a API: {e}")
-        return None, None
-    except Exception as e:
-        logging.error(f"Erro inesperado em buscar_ultimo_numero_api: {e}")
+        
         return None, None
     except requests.exceptions.RequestException as e:
         logging.error(f"Erro ao fazer requisição para a API: {e}")
@@ -246,7 +238,7 @@ async def check_and_send_period_messages(bot):
     now_br = datetime.now(FUSO_HORARIO_BRASIL)
     if now_br.hour >= HORA_TARDE and not daily_messages_sent.get("tarde"):
         logging.info("Enviando mensagem do período da tarde.")
-        partial_score = format_score_message(title="📊 *Placar Parcial (Manhã)* 📊")
+        partial_score = format_score_message(title="📊 *Placar Parcial (Manã)* 📊")
         streaks = calculate_streaks_for_period(dt_time.min, dt_time(hour=11, minute=59, second=59))
         streak_report = f"\n\nSequência Máx. de Vitórias: *{streaks['max_wins']}* ✅\nSequência Máx. de Derrotas: *{streaks['max_losses']}* ❌"
         message = f"☀️ Período da tarde iniciando!\n\nNossa parcial da **MANHÃ** foi:\n{partial_score}{streak_report}"
@@ -345,4 +337,3 @@ if __name__ == '__main__':
         logging.info("Bot encerrado manualmente.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
-
