@@ -8,36 +8,34 @@ import asyncio
 import random
 from datetime import datetime, timedelta, time as dt_time
 import pytz
-import requests  # Nova biblioteca para a API
+import requests
 import telegram
 from telegram.constants import ParseMode
-import psycopg2  # Para o banco de dados
+import psycopg2
 from urllib.parse import urlparse
+import traceback # <-- IMPORTAÇÃO PARA DEPURAÇÃO DETALHADA
 
 # --- CONFIGURAÇÕES ESSENCIAIS (Simplificado sem Selenium) ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
 CHAT_IDS_STR = os.environ.get('CHAT_ID')
-URL_APOSTA = os.environ.get('URL_APOSTA')
+URL_APosta = os.environ.get('URL_APOSTA')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # Validação crítica das variáveis de ambiente
-if not all([TOKEN_BOT, CHAT_IDS_STR, URL_APOSTA, DATABASE_URL]):
+if not all([TOKEN_BOT, CHAT_IDS_STR, URL_APosta, DATABASE_URL]):
     logging.critical("ERRO: Todas as variáveis de ambiente devem ser definidas: TOKEN_BOT, CHAT_ID, URL_APOSTA, DATABASE_URL!")
     exit()
 
 CHAT_IDS = [chat_id.strip() for chat_id in CHAT_IDS_STR.split(',')]
 
-INTERVALO_VERIFICACAO_API = 5  # Segundos
+INTERVALO_VERIFICACAO_API = 5
 MAX_MARTINGALES = 2
 
 # --- CONFIGURAÇÕES DE HUMANIZAÇÃO E HORA ---
 FUSO_HORARIO_BRASIL = pytz.timezone('America/Sao_Paulo')
-WORK_MIN_MINUTES = 3 * 60
-WORK_MAX_MINUTES = 5 * 60
-BREAK_MIN_MINUTES = 25
-BREAK_MAX_MINUTES = 45
-HORA_TARDE = 12
-HORA_NOITE = 18
+WORK_MIN_MINUTES = 3 * 60; WORK_MAX_MINUTES = 5 * 60
+BREAK_MIN_MINUTES = 25; BREAK_MAX_MINUTES = 45
+HORA_TARDE = 12; HORA_NOITE = 18
 
 # --- FUNÇÕES DE BANCO DE DADOS POSTGRESQL ---
 def get_db_connection():
@@ -100,8 +98,6 @@ ESTRATEGIAS = { "Estratégia Menos Fichas": { "triggers": list(STRATEGY_MENOS_FI
 
 # --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Variáveis globais para controle de estado
 ultimo_numero_processado_api = None
 numero_anterior_estrategia = None
 daily_play_history = []
@@ -128,7 +124,6 @@ reset_daily_messages_tracker()
 reset_strategy_state()
 
 def buscar_ultimo_numero_api():
-    """Busca o último número diretamente da API, sem usar Selenium."""
     global ultimo_numero_processado_api, numero_anterior_estrategia
     try:
         cache_buster = int(time.time() * 1000)
@@ -136,19 +131,15 @@ def buscar_ultimo_numero_api():
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         dados = response.json()
-
         if not dados:
             logging.warning("API retornou uma lista vazia.")
             return None, None
-            
         novo_numero = int(dados[0])
-
         if novo_numero != ultimo_numero_processado_api:
             logging.info(f"✅ Novo giro detectado via API: {novo_numero} (Anterior: {ultimo_numero_processado_api})")
             numero_anterior_estrategia = ultimo_numero_processado_api
             ultimo_numero_processado_api = novo_numero
             return novo_numero, numero_anterior_estrategia
-        
         return None, None
     except requests.exceptions.RequestException as e:
         logging.error(f"Erro ao fazer requisição para a API: {e}")
@@ -249,7 +240,7 @@ async def check_and_send_period_messages(bot):
 
 def build_base_signal_message():
     name = active_strategy_state['strategy_name']; numero = active_strategy_state['trigger_number']; winning_numbers = active_strategy_state['winning_numbers']
-    return (f"🎯 *Gatilho Encontrado!* 🎯\n\n🎲 *Estratégia: {name}*\n🔢 *Número Gatilho: {numero}*\n\n💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n[🔗 Fazer Aposta]({URL_APOSTA})")
+    return (f"🎯 *Gatilho Encontrado!* 🎯\n\n🎲 *Estratégia: {name}*\n🔢 *Número Gatilho: {numero}*\n\n💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n[🔗 Fazer Aposta]({URL_APosta})")
 
 async def handle_win(bot, final_number):
     daily_play_history.append({'time': datetime.now(FUSO_HORARIO_BRASIL), 'result': 'win'})
@@ -296,10 +287,19 @@ async def work_session(bot):
     await send_message_to_all(bot, f"Monitoramento de ciclos (API) previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
 
     while datetime.now(FUSO_HORARIO_BRASIL) < session_end_time:
+        # LOGS DE DEPURAÇÃO ADICIONADOS
+        logging.info("Iniciando iteração do loop de trabalho...")
         await check_and_send_period_messages(bot)
+        
+        logging.info("Buscando número da API...")
         numero, numero_anterior = buscar_ultimo_numero_api()
+        logging.info(f"API retornou: numero={numero}, anterior={numero_anterior}. Processando...")
+        
         await processar_numero(bot, numero, numero_anterior)
+        
+        logging.info("Processamento concluído. Aguardando próximo ciclo...")
         await asyncio.sleep(INTERVALO_VERIFICACAO_API)
+        
     logging.info("Sessão de trabalho (API) concluída. Preparando para a pausa.")
 
 async def supervisor():
@@ -319,7 +319,10 @@ async def supervisor():
             logging.info("Pausa finalizada. Iniciando nova sessão de trabalho.")
             await send_message_to_all(bot, f"✅ Sistema operante novamente!")
         except Exception as e:
-            logging.critical(f"O processo supervisor falhou: {e}. Reiniciando o ciclo em 60 segundos.")
+            # BLOCO DE EXCEÇÃO MODIFICADO PARA DEPURAÇÃO
+            tb_str = traceback.format_exc()
+            logging.critical(f"O processo supervisor falhou! Erro: {e}\nTraceback:\n{tb_str}")
+            logging.critical("Reiniciando o ciclo em 60 segundos.")
             await asyncio.sleep(60)
 
 if __name__ == '__main__':
