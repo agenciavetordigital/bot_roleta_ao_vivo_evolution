@@ -125,6 +125,9 @@ reset_strategy_state()
 def buscar_ultimo_numero_api():
     global ultimo_numero_processado_api, numero_anterior_estrategia
     try:
+        # --- LOG DE DEPURAÇÃO ADICIONADO ---
+        logging.info(f"[DEBUG] Iniciando busca. Estado atual: ultimo_numero_processado_api = {ultimo_numero_processado_api}")
+
         cache_buster = int(time.time() * 1000)
         url = f"https://api.jogosvirtual.com/jsons/historico_roletabrasileira.json?_={cache_buster}"
         response = requests.get(url, timeout=10)
@@ -135,15 +138,16 @@ def buscar_ultimo_numero_api():
             logging.warning("API retornou uma resposta vazia.")
             return None, None
 
-        valor_bruto = dados.get("0") # Usamos .get() para evitar KeyError se a chave "0" não existir
-
-        # --- CORREÇÃO FINAL APLICADA AQUI ---
+        valor_bruto = dados.get("0")
+        
         try:
-            # Tentamos converter o valor para um número.
             novo_numero = int(valor_bruto)
+            # --- LOG DE DEPURAÇÃO ADICIONADO ---
+            logging.info(f"[DEBUG] API retornou: {novo_numero}. Comparando com {ultimo_numero_processado_api}.")
+
         except (ValueError, TypeError):
-            # Se falhar (ex: o valor é "Girando..."), não é um erro.
-            # Apenas significa que não há um novo número ainda. Retornamos None.
+            # Se o valor não for um número (ex: "Girando..."), registramos e ignoramos.
+            logging.info(f"[DEBUG] API retornou valor não numérico: '{valor_bruto}'. Ignorando.")
             return None, None
             
         if novo_numero != ultimo_numero_processado_api:
@@ -152,6 +156,12 @@ def buscar_ultimo_numero_api():
             ultimo_numero_processado_api = novo_numero
             return novo_numero, numero_anterior_estrategia
             
+        return None, None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Erro ao fazer requisição para a API: {e}")
+        return None, None
+    except Exception as e:
+        logging.error(f"Erro inesperado em buscar_ultimo_numero_api: {e}")
         return None, None
     except requests.exceptions.RequestException as e:
         logging.error(f"Erro ao fazer requisição para a API: {e}")
@@ -335,3 +345,4 @@ if __name__ == '__main__':
         logging.info("Bot encerrado manualmente.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
+
