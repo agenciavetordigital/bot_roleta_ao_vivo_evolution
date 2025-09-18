@@ -125,29 +125,32 @@ reset_strategy_state()
 def buscar_ultimo_numero_api():
     global ultimo_numero_processado_api, numero_anterior_estrategia
     try:
+        # Log para sabermos o estado antes da chamada
+        logging.info(f"[DEBUG] Iniciando busca. Estado atual: ultimo_numero_processado_api = {ultimo_numero_processado_api}")
+
         cache_buster = int(time.time() * 1000)
         url = f"https://api.jogosvirtual.com/jsons/historico_roletabrasileira.json?_={cache_buster}"
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         dados = response.json()
 
+        # --- LOG DE DEPURAÇÃO MAIS IMPORTANTE ---
+        # Vamos imprimir exatamente o que a API nos retornou
+        logging.info(f"[DEBUG] Dados brutos recebidos da API: {dados}")
+        
         if not dados:
             return None, None
 
         valor_bruto = dados.get("0")
-
-        # --- CORREÇÃO FINAL E DEFINITIVA ---
-        # Primeiro, verificamos se o valor é None, que é o que a API retorna entre os giros.
-        if valor_bruto is None:
-            return None, None # Se for None, apenas ignoramos e esperamos a próxima verificação.
         
-        # Só então tentamos converter para número.
+        if valor_bruto is None:
+            return None, None
+        
         try:
             novo_numero = int(valor_bruto)
         except (ValueError, TypeError):
-            # Caso a API retorne algo inesperado que não seja número (ex: "Aguarde")
             return None, None
-        
+            
         if novo_numero != ultimo_numero_processado_api:
             logging.info(f"✅ Novo giro detectado via API: {novo_numero} (Anterior: {ultimo_numero_processado_api})")
             numero_anterior_estrategia = ultimo_numero_processado_api
@@ -337,3 +340,4 @@ if __name__ == '__main__':
         logging.info("Bot encerrado manualmente.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
+
