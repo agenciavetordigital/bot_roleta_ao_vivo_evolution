@@ -125,23 +125,22 @@ reset_strategy_state()
 def buscar_ultimo_numero_api():
     global ultimo_numero_processado_api, numero_anterior_estrategia
     try:
-        # Log para sabermos o estado antes da chamada
-        logging.info(f"[DEBUG] Iniciando busca. Estado atual: ultimo_numero_processado_api = {ultimo_numero_processado_api}")
-
         cache_buster = int(time.time() * 1000)
         url = f"https://api.jogosvirtual.com/jsons/historico_roletabrasileira.json?_={cache_buster}"
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         dados = response.json()
 
-        # --- LOG DE DEPURAÇÃO MAIS IMPORTANTE ---
-        # Vamos imprimir exatamente o que a API nos retornou
-        logging.info(f"[DEBUG] Dados brutos recebidos da API: {dados}")
-        
-        if not dados:
+        # --- CORREÇÃO DEFINITIVA DA LÓGICA DE EXTRAÇÃO ---
+        # Navegamos pela estrutura aninhada para encontrar a lista de números.
+        # Usamos .get() com valores padrão para evitar erros se a estrutura mudar.
+        lista_de_numeros = dados.get('baralhos', {}).get('0', [])
+
+        if not lista_de_numeros:
             return None, None
 
-        valor_bruto = dados.get("0")
+        # O número mais recente é o primeiro item da lista.
+        valor_bruto = lista_de_numeros[0]
         
         if valor_bruto is None:
             return None, None
@@ -150,7 +149,7 @@ def buscar_ultimo_numero_api():
             novo_numero = int(valor_bruto)
         except (ValueError, TypeError):
             return None, None
-            
+        
         if novo_numero != ultimo_numero_processado_api:
             logging.info(f"✅ Novo giro detectado via API: {novo_numero} (Anterior: {ultimo_numero_processado_api})")
             numero_anterior_estrategia = ultimo_numero_processado_api
@@ -174,7 +173,7 @@ async def processar_numero(bot, numero, numero_anterior):
     else:
         await check_for_new_triggers(bot, numero, numero_anterior)
 
-# (O restante do código é idêntico ao anterior e não precisa de alterações)
+# (O restante do código é idêntico e não precisa de alterações)
 def calculate_streaks_for_period(start_time, end_time):
     plays_in_period = [p['result'] for p in daily_play_history if start_time <= p['time'].time() < end_time]
     if not plays_in_period: return {"max_wins": 0, "max_losses": 0}
@@ -241,7 +240,7 @@ async def check_and_send_period_messages(bot):
     now_br = datetime.now(FUSO_HORARIO_BRASIL)
     if now_br.hour >= HORA_TARDE and not daily_messages_sent.get("tarde"):
         logging.info("Enviando mensagem do período da tarde.")
-        partial_score = format_score_message(title="📊 *Placar Parcial (Manã)* 📊")
+        partial_score = format_score_message(title="📊 *Placar Parcial (Manhã)* 📊")
         streaks = calculate_streaks_for_period(dt_time.min, dt_time(hour=11, minute=59, second=59))
         streak_report = f"\n\nSequência Máx. de Vitórias: *{streaks['max_wins']}* ✅\nSequência Máx. de Derrotas: *{streaks['max_losses']}* ❌"
         message = f"☀️ Período da tarde iniciando!\n\nNossa parcial da **MANHÃ** foi:\n{partial_score}{streak_report}"
@@ -340,4 +339,3 @@ if __name__ == '__main__':
         logging.info("Bot encerrado manualmente.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
-
