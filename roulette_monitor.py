@@ -136,7 +136,9 @@ def buscar_ultimo_numero_api():
         if not lista_de_numeros:
             return None, None
 
-        valor_bruto = lista_de_numeros[0]
+        # --- CORREÇÃO FINAL BASEADA NA SUA ANÁLISE ---
+        # Pegamos o ÚLTIMO item da lista, que é o mais recente.
+        valor_bruto = lista_de_numeros[-1]
         
         if valor_bruto is None:
             return None, None
