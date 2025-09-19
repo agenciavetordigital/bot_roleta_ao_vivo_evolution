@@ -30,6 +30,10 @@ CHAT_IDS = [chat_id.strip() for chat_id in CHAT_IDS_STR.split(',')]
 INTERVALO_VERIFICACAO_API = 5
 MAX_MARTINGALES = 2
 
+# --- NOVA CONFIGURAÇÃO DE ESTRATÉGIA ---
+GATILHO_ATRASO_DUZIA = 15 # Enviar sinal se uma dúzia estiver atrasada há 15 rodadas
+NUMEROS_PARA_ANALISE = 50  # Analisar os últimos 50 números
+
 # --- CONFIGURAÇÕES DE HUMANIZAÇÃO E HORA ---
 FUSO_HORARIO_BRASIL = pytz.timezone('America/Sao_Paulo')
 WORK_MIN_MINUTES = 3 * 60; WORK_MAX_MINUTES = 5 * 60
@@ -86,14 +90,67 @@ def salvar_numero_postgres(numero):
             logging.error(f"Erro ao salvar número no DB: {error}")
         finally:
             conn.close()
+            
+# --- NOVAS FUNÇÕES PARA ANÁLISE ESTRATÉGICA ---
+
+def buscar_numeros_recentes_para_analise(limite=NUMEROS_PARA_ANALISE):
+    """Busca os números mais recentes do banco de dados para análise."""
+    conn = get_db_connection()
+    if conn is None: return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT numero FROM resultados ORDER BY id DESC LIMIT %s;", (limite,))
+            # O fetchall retorna uma lista de tuplas, ex: [(10,), (25,)]
+            resultados = cur.fetchall()
+            return [item[0] for item in resultados] # Convertemos para uma lista simples [10, 25]
+    except (Exception, psycopg2.DatabaseError) as error:
+        logging.error(f"Erro ao buscar números recentes do DB: {error}")
+        return []
+    finally:
+        conn.close()
+
+def analisar_atraso_duzias(numeros_recentes):
+    """Analisa a lista de números e retorna a dúzia mais atrasada e o tamanho do atraso."""
+    if len(numeros_recentes) < GATILHO_ATRASO_DUZIA:
+        return None, 0 # Não há dados suficientes para a análise
+
+    atrasos = {1: -1, 2: -1, 3: -1} # -1 significa que ainda não foi encontrada
+    
+    for i, numero in enumerate(numeros_recentes):
+        if 1 <= numero <= 12 and atrasos[1] == -1:
+            atrasos[1] = i
+        elif 13 <= numero <= 24 and atrasos[2] == -1:
+            atrasos[2] = i
+        elif 25 <= numero <= 36 and atrasos[3] == -1:
+            atrasos[3] = i
+        
+        # Se todas as dúzias foram encontradas, podemos parar
+        if all(v != -1 for v in atrasos.values()):
+            break
+            
+    # Se alguma dúzia não apareceu nos últimos 50 números, consideramos o atraso máximo
+    for duzia in atrasos:
+        if atrasos[duzia] == -1:
+            atrasos[duzia] = len(numeros_recentes)
+
+    duzia_atrasada = max(atrasos, key=atrasos.get)
+    atraso_maximo = atrasos[duzia_atrasada]
+
+    return duzia_atrasada, atraso_maximo
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
+DUZIAS = {
+    1: list(range(1, 13)),
+    2: list(range(13, 25)),
+    3: list(range(25, 37))
+}
 STRATEGY_MENOS_FICHAS_NEIGHBORS = { 2: [15, 19, 4, 21, 2, 25, 17, 34, 6], 7: [9, 22, 18, 29, 7, 28, 12, 35, 3], 12: [18, 29, 7, 28, 12, 35, 3, 26, 0], 17: [4, 21, 2, 25, 17, 34, 6, 27, 13], 22: [20, 14, 31, 9, 22, 18, 29, 7, 28], 27: [25, 17, 34, 6, 27, 13, 36, 11, 30], 32: [35, 3, 26, 0, 32, 15, 19, 4, 21], 11: [6, 27, 13, 36, 11, 30, 8, 23, 10], 16: [23, 10, 5, 24, 16, 33, 1, 20, 14], 25: [19, 4, 21, 2, 25, 17, 34, 6, 27], 34: [21, 2, 25, 17, 34, 6, 27, 13, 36]}
 def get_winners_menos_fichas(trigger_number):
     winners = STRATEGY_MENOS_FICHAS_NEIGHBORS.get(trigger_number, [])
     if 0 not in winners: winners.append(0)
     return winners
-ESTRATEGIAS = { "Estratégia Menos Fichas": { "triggers": list(STRATEGY_MENOS_FICHAS_NEIGHBORS.keys()), "filter": [], "get_winners": get_winners_menos_fichas }}
+
+ESTRATEGIAS_FIXAS = { "Estratégia Menos Fichas": { "triggers": list(STRATEGY_MENOS_FICHAS_NEIGHBORS.keys()), "filter": [], "get_winners": get_winners_menos_fichas }}
 
 # --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -109,7 +166,9 @@ def reset_daily_messages_tracker():
 
 def initialize_score():
     score = {"last_check_date": datetime.now(FUSO_HORARIO_BRASIL).date()}
-    for name in ESTRATEGIAS:
+    # Adicionamos dinamicamente as estratégias ao placar
+    all_strategies = list(ESTRATEGIAS_FIXAS.keys()) + ["Estratégia Atraso de Dúzias"]
+    for name in all_strategies:
         score[name] = {"wins_sg": 0, "wins_g1": 0, "wins_g2": 0, "losses": 0}
     return score
 
@@ -130,30 +189,21 @@ def buscar_ultimo_numero_api():
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         dados = response.json()
-
         lista_de_numeros = dados.get('baralhos', {}).get('0', [])
-
         if not lista_de_numeros:
             return None, None
-
-        # --- CORREÇÃO FINAL BASEADA NA SUA ANÁLISE ---
-        # Pegamos o ÚLTIMO item da lista, que é o mais recente.
         valor_bruto = lista_de_numeros[-1]
-        
         if valor_bruto is None:
             return None, None
-        
         try:
             novo_numero = int(valor_bruto)
         except (ValueError, TypeError):
             return None, None
-            
         if novo_numero != ultimo_numero_processado_api:
             logging.info(f"✅ Novo giro detectado via API: {novo_numero} (Anterior: {ultimo_numero_processado_api})")
             numero_anterior_estrategia = ultimo_numero_processado_api
             ultimo_numero_processado_api = novo_numero
             return novo_numero, numero_anterior_estrategia
-        
         return None, None
     except requests.exceptions.RequestException as e:
         logging.error(f"Erro ao fazer requisição para a API: {e}")
@@ -169,6 +219,7 @@ async def processar_numero(bot, numero, numero_anterior):
     if active_strategy_state["active"]:
         await handle_active_strategy(bot, numero)
     else:
+        # A verificação agora inclui as estratégias dinâmicas
         await check_for_new_triggers(bot, numero, numero_anterior)
 
 def calculate_streaks_for_period(start_time, end_time):
@@ -184,13 +235,15 @@ def calculate_streaks_for_period(start_time, end_time):
 
 def format_score_message(title="📊 *Placar do Dia* 📊"):
     messages = [title]; overall_wins, overall_losses = 0, 0
+    # Modificado para garantir que a estratégia exista no placar
     for name, score in daily_score.items():
-        if name == "last_check_date": continue
-        strategy_wins = score['wins_sg'] + score['wins_g1'] + score['wins_g2']; strategy_losses = score['losses']
+        if name == "last_check_date" or not isinstance(score, dict): continue
+        strategy_wins = score.get('wins_sg', 0) + score.get('wins_g1', 0) + score.get('wins_g2', 0)
+        strategy_losses = score.get('losses', 0)
         overall_wins += strategy_wins; overall_losses += strategy_losses
         total_plays = strategy_wins + strategy_losses
         accuracy = (strategy_wins / total_plays * 100) if total_plays > 0 else 0
-        wins_str = f"SG: {score['wins_sg']} | G1: {score['wins_g1']} | G2: {score['wins_g2']}"
+        wins_str = f"SG: {score.get('wins_sg', 0)} | G1: {score.get('wins_g1', 0)} | G2: {score.get('wins_g2', 0)}"
         messages.append(f"*{name}* (Assertividade: {accuracy:.1f}%)\n`   `✅ `{wins_str}`\n`   `❌ `{strategy_losses}`")
     total_overall_plays = overall_wins + overall_losses
     overall_accuracy = (overall_wins / total_overall_plays * 100) if total_overall_plays > 0 else 0
@@ -254,6 +307,13 @@ async def check_and_send_period_messages(bot):
 
 def build_base_signal_message():
     name = active_strategy_state['strategy_name']; numero = active_strategy_state['trigger_number']; winning_numbers = active_strategy_state['winning_numbers']
+    # Mensagem customizada para a estratégia de dúzias
+    if name == "Estratégia Atraso de Dúzias":
+        return (f"🎯 *Gatilho Estatístico Encontrado!* 🎯\n\n🎲 *Estratégia: {name}*\n"
+                f"📈 *Análise: Dúzia {numero} está atrasada há {active_strategy_state['trigger_info']} rodadas!*\n\n"
+                f"💰 *Apostar na Dúzia {numero}:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n[🔗 Fazer Aposta]({URL_APOSTA})")
+    
+    # Mensagem padrão para outras estratégias
     return (f"🎯 *Gatilho Encontrado!* 🎯\n\n🎲 *Estratégia: {name}*\n🔢 *Número Gatilho: {numero}*\n\n💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`\n\n[🔗 Fazer Aposta]({URL_APOSTA})")
 
 async def handle_win(bot, final_number):
@@ -276,14 +336,24 @@ async def handle_martingale(bot, current_number):
     await edit_play_messages(bot, mensagem_editada, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_active_strategy(bot, numero):
-    if numero in active_strategy_state["winning_numbers"]: await handle_win(bot, numero)
+    _, duzia_do_numero, _, _ = get_properties(numero)
+    winning_numbers = active_strategy_state["winning_numbers"]
+    
+    # A lógica de vitória precisa considerar se o número está na lista de vencedores
+    # Para dúzias, a lista é grande, mas a checagem é a mesma
+    if numero in winning_numbers or (active_strategy_state['strategy_name'] == "Estratégia Atraso de Dúzias" and duzia_do_numero == active_strategy_state['trigger_number']):
+        await handle_win(bot, numero)
     else:
         active_strategy_state["martingale_level"] += 1
-        if active_strategy_state["martingale_level"] <= MAX_MARTINGALES: await handle_martingale(bot, numero)
-        else: await handle_loss(bot, numero)
+        if active_strategy_state["martingale_level"] <= MAX_MARTINGALES:
+            await handle_martingale(bot, numero)
+        else:
+            await handle_loss(bot, numero)
 
+# --- FUNÇÃO DE VERIFICAÇÃO DE ESTRATÉGIAS (MODIFICADA) ---
 async def check_for_new_triggers(bot, numero, numero_anterior):
-    for name, details in ESTRATEGIAS.items():
+    # 1. Checar Estratégias Fixas
+    for name, details in ESTRATEGIAS_FIXAS.items():
         if numero in details["triggers"]:
             if details.get("filter") and numero_anterior is not None and numero_anterior in details["filter"]:
                 logging.info(f"Gatilho {numero} ignorado para '{name}' devido ao filtro com número anterior {numero_anterior}.")
@@ -292,7 +362,25 @@ async def check_for_new_triggers(bot, numero, numero_anterior):
             active_strategy_state.update({ "active": True, "strategy_name": name, "winning_numbers": winning_numbers, "trigger_number": numero })
             mensagem = f"{build_base_signal_message()}\n\n---\n{format_score_message()}"
             await send_and_track_play_message(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
-            break
+            return # Sai da função para não procurar outras estratégias
+
+    # 2. Checar Estratégias Dinâmicas (baseadas em análise)
+    numeros_recentes = buscar_numeros_recentes_para_analise()
+    duzia_atrasada, atraso = analisar_atraso_duzias(numeros_recentes)
+    
+    if atraso >= GATILHO_ATRASO_DUZIA:
+        logging.info(f"Gatilho de Atraso de Dúzia encontrado! Dúzia {duzia_atrasada} está a {atraso} rodadas sem sair.")
+        winning_numbers = DUZIAS[duzia_atrasada]
+        active_strategy_state.update({
+            "active": True,
+            "strategy_name": "Estratégia Atraso de Dúzias",
+            "winning_numbers": winning_numbers,
+            "trigger_number": duzia_atrasada, # Gatilho é a própria dúzia
+            "trigger_info": atraso # Informação extra para a mensagem
+        })
+        mensagem = f"{build_base_signal_message()}\n\n---\n{format_score_message()}"
+        await send_and_track_play_message(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
+        return
 
 async def work_session(bot):
     work_duration_minutes = random.randint(WORK_MIN_MINUTES, WORK_MAX_MINUTES)
