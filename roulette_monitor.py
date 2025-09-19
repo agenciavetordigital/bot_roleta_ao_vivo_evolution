@@ -31,7 +31,7 @@ INTERVALO_VERIFICACAO_API = 5
 MAX_MARTINGALES = 2
 
 # --- NOVA CONFIGURAÇÃO DE ESTRATÉGIA ---
-GATILHO_ATRASO_DUZIA = 11 # Enviar sinal se uma dúzia estiver atrasada há 15 rodadas
+GATILHO_ATRASO_DUZIA = 10 # Enviar sinal se uma dúzia estiver atrasada há 15 rodadas
 NUMEROS_PARA_ANALISE = 50  # Analisar os últimos 50 números
 
 # --- CONFIGURAÇÕES DE HUMANIZAÇÃO E HORA ---
@@ -424,4 +424,5 @@ if __name__ == '__main__':
         logging.info("Bot encerrado manualmente.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
+
 
