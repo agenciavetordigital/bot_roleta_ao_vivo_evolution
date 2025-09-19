@@ -31,7 +31,7 @@ INTERVALO_VERIFICACAO_API = 5
 MAX_MARTINGALES = 2
 
 # --- NOVA CONFIGURAÇÃO DE ESTRATÉGIA ---
-GATILHO_ATRASO_DUZIA = 15 # Enviar sinal se uma dúzia estiver atrasada há 15 rodadas
+GATILHO_ATRASO_DUZIA = 11 # Enviar sinal se uma dúzia estiver atrasada há 15 rodadas
 NUMEROS_PARA_ANALISE = 50  # Analisar os últimos 50 números
 
 # --- CONFIGURAÇÕES DE HUMANIZAÇÃO E HORA ---
@@ -385,19 +385,19 @@ async def check_for_new_triggers(bot, numero, numero_anterior):
 async def work_session(bot):
     work_duration_minutes = random.randint(WORK_MIN_MINUTES, WORK_MAX_MINUTES)
     session_end_time = datetime.now(FUSO_HORARIO_BRASIL) + timedelta(minutes=work_duration_minutes)
-    logging.info(f"Iniciando nova sessão de trabalho (API) que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
-    await send_message_to_all(bot, f"Monitoramento de ciclos (API) previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
+    logging.info(f"Iniciando nova sessão de trabalho que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
+    await send_message_to_all(bot, f"Monitoramento de ciclos previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
     while datetime.now(FUSO_HORARIO_BRASIL) < session_end_time:
         await check_and_send_period_messages(bot)
         numero, numero_anterior = buscar_ultimo_numero_api()
         await processar_numero(bot, numero, numero_anterior)
         await asyncio.sleep(INTERVALO_VERIFICACAO_API)
-    logging.info("Sessão de trabalho (API) concluída. Preparando para a pausa.")
+    logging.info("Sessão de trabalho concluída. Preparando para a pausa.")
 
 async def supervisor():
     bot = telegram.Bot(token=TOKEN_BOT)
     try:
-        await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online (API Mode)!\nIniciando gerenciamento de ciclos.")
+        await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online!\nIniciando gerenciamento de ciclos.")
     except Exception as e:
         logging.critical(f"Não foi possível conectar ao Telegram para a mensagem inicial: {e}")
     while True:
@@ -424,3 +424,4 @@ if __name__ == '__main__':
         logging.info("Bot encerrado manualmente.")
     except Exception as e:
         logging.critical(f"Erro fatal no supervisor: {e}")
+
