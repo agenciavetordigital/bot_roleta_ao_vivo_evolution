@@ -1,14 +1,12 @@
-# .github/workflows/training.yml
-
 name: Treinamento Diário do Modelo de IA
 
 on:
-  workflow_dispatch: # Permite iniciar manualmente
+  workflow_dispatch:
   schedule:
-    - cron: '0 3 * * *' # Roda todo dia às 3h da manhã (UTC)
+    - cron: '0 3 * * *'
 
-permissions:      # <--- ADICIONE ESTE BLOCO
-  contents: write # <---
+permissions:
+  contents: write
 
 jobs:
   train:
@@ -36,5 +34,11 @@ jobs:
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
           git add modelo_ia.pkl
-          git diff --quiet && git diff --staged --quiet || git commit -m "[Auto] Atualiza modelo de IA treinado"
-          git push
+          # Verifica se há algo para comitar
+          if ! (git diff --quiet && git diff --staged --quiet); then
+            git commit -m "[Auto] Atualiza modelo de IA treinado"
+            # A linha abaixo faz o push usando um token de autenticação explícito
+            git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
+          else
+            echo "Nenhuma mudança no modelo para comitar."
+          fi
