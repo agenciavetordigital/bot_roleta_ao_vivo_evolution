@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# VERSÃO FINAL COM MÚLTIPLAS ESTRATÉGIAS DE IA
+# VERSÃO FINAL COM COBERTURA DO ZERO EM TODAS AS ESTRATÉGIAS
 
 # --- IMPORTAÇÕES ---
 import os
@@ -35,7 +35,7 @@ MAX_MARTINGALES = 2
 # --- CONFIGURAÇÕES DE ESTRATÉGIA ---
 GATILHO_ATRASO_DUZIA = 10
 NUMEROS_PARA_ANALISE = 50
-GATILHO_CONFIANCA_IA_DUZIAS = 0.50 
+GATILHO_CONFIANCA_IA_DUZIAS = 0.55 
 GATILHO_CONFIANCA_IA_TOP5 = 0.40
 SEQUENCE_LENGTH_IA_DUZIAS = 10
 SEQUENCE_LENGTH_IA_NUMEROS = 15
@@ -249,7 +249,6 @@ async def check_and_reset_daily_score(bot):
         daily_score = initialize_score(); daily_play_history.clear(); reset_daily_messages_tracker()
         await send_message_to_all(bot, "☀️ Bom dia! Um novo dia de análises está começando.")
 
-# --- FUNÇÕES QUE FALTAVAM (RE-ADICIONADAS) ---
 def calculate_streaks_for_period(start_time, end_time):
     plays_in_period = [p['result'] for p in daily_play_history if start_time <= p['time'].time() < end_time]
     if not plays_in_period: return {"max_wins": 0, "max_losses": 0}
@@ -280,7 +279,6 @@ async def check_and_send_period_messages(bot):
         message = f"🌙 Período da noite iniciando!\n\nNossa parcial da **TARDE** foi:\n{partial_score}{streak_report}"
         await send_message_to_all(bot, message, parse_mode=ParseMode.MARKDOWN)
         daily_messages_sent["noite"] = True
-# ---------------------------------------------------
 
 def build_base_signal_message():
     name = active_strategy_state['strategy_name']; winning_numbers = active_strategy_state['winning_numbers']; trigger_info = active_strategy_state.get('trigger_info', '')
@@ -291,11 +289,11 @@ def build_base_signal_message():
     if name == "Estratégia IA Dúzias":
         return (f"🤖 *Sinal de IA (Dúzias)!* 🤖\n\n🎲 *Estratégia: {name}*\n"
                 f"🧠 *Análise do Modelo: Dúzia {active_strategy_state['trigger_number']} com {trigger_info:.1%} de confiança!*\n\n"
-                f"💰 *Apostar na Dúzia {active_strategy_state['trigger_number']}:*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
+                f"💰 *Apostar na Dúzia {active_strategy_state['trigger_number']} e no Zero:*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
     if name == "Estratégia IA Top 5 Números":
         return (f"🤖 *Sinal de IA (Top 5)!* 🤖\n\n🎲 *Estratégia: {name}*\n"
                 f"🧠 *Análise do Modelo: Confiança de {trigger_info:.1%} nos seguintes números!*\n\n"
-                f"💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
+                f"💰 *Apostar em (Top 5 + Zero):*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
     return ""
 
 async def handle_win(bot, final_number):
@@ -320,12 +318,7 @@ async def handle_martingale(bot, current_number):
     await edit_play_messages(bot, mensagem_editada, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_active_strategy(bot, numero):
-    _, duzia_do_numero, _, _ = get_properties(numero); winning_numbers = active_strategy_state["winning_numbers"]
-    is_win = numero in winning_numbers
-    if active_strategy_state['strategy_name'] == "Estratégia IA Dúzias":
-        is_win = duzia_do_numero == active_strategy_state['trigger_number'] and numero != 0
-
-    if is_win: await handle_win(bot, numero)
+    if numero in active_strategy_state["winning_numbers"]: await handle_win(bot, numero)
     else:
         active_strategy_state["martingale_level"] += 1
         if active_strategy_state["martingale_level"] <= MAX_MARTINGALES: await handle_martingale(bot, numero)
@@ -339,13 +332,17 @@ async def check_for_new_triggers(bot, numero, numero_anterior):
     top_5, conf_top5 = analisar_ia_top5(numeros_recentes)
     if top_5 is not None and conf_top5 >= GATILHO_CONFIANCA_IA_TOP5:
         logging.info(f"Gatilho IA Top 5! Confiança: {conf_top5:.1%}. Números: {top_5}")
-        active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Top 5 Números", "winning_numbers": top_5, "trigger_number": ", ".join(map(str,sorted(top_5))), "trigger_info": conf_top5 })
+        winning_numbers = top_5
+        if 0 not in winning_numbers: winning_numbers.append(0)
+        active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Top 5 Números", "winning_numbers": winning_numbers, "trigger_number": ", ".join(map(str,sorted(top_5))), "trigger_info": conf_top5 })
     
     elif MODELO_IA_DUZIAS:
         duzia_ia, conf_duzia = analisar_ia_duzias(numeros_recentes)
         if duzia_ia is not None and conf_duzia >= GATILHO_CONFIANCA_IA_DUZIAS:
             logging.info(f"Gatilho IA Dúzias! Dúzia {duzia_ia} com {conf_duzia:.1%} de confiança.")
-            active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Dúzias", "winning_numbers": DUZIAS[duzia_ia], "trigger_number": duzia_ia, "trigger_info": conf_duzia })
+            winning_numbers = DUZIAS[duzia_ia].copy()
+            if 0 not in winning_numbers: winning_numbers.append(0)
+            active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Dúzias", "winning_numbers": winning_numbers, "trigger_number": duzia_ia, "trigger_info": conf_duzia })
 
     else:
         duzia_atrasada, atraso = analisar_atraso_duzias(numeros_recentes)
@@ -367,7 +364,7 @@ async def work_session(bot):
         numero, numero_anterior = buscar_ultimo_numero_api()
         if numero is not None: await processar_numero(bot, numero, numero_anterior)
         await asyncio.sleep(INTERVALO_VERIFICACAO_API)
-    logging.info("Sessão de trabalho (API) concluída.")
+    logging.info("Sessão de trabalho concluída.")
 
 async def supervisor():
     bot = telegram.Bot(token=TOKEN_BOT)
@@ -375,7 +372,7 @@ async def supervisor():
     except Exception as e: logging.critical(f"Não foi possível conectar ao Telegram na inicialização: {e}")
     while True:
         try:
-            await check_and_send_period_messages(bot)
+            await check_and_send_period_messages(bot) # <-- Chamada estava faltando aqui
             await work_session(bot)
             break_duration_minutes = random.randint(BREAK_MIN_MINUTES, BREAK_MAX_MINUTES)
             logging.info(f"Iniciando pausa de {break_duration_minutes} minutos.")
@@ -395,4 +392,3 @@ if __name__ == '__main__':
     try: asyncio.run(supervisor())
     except KeyboardInterrupt: logging.info("Bot encerrado manualmente.")
     except Exception as e: logging.critical(f"Erro fatal no supervisor: {e}")
-
