@@ -33,10 +33,10 @@ INTERVALO_VERIFICACAO_API = 5
 MAX_MARTINGALES = 2
 
 # --- CONFIGURAÇÕES DE ESTRATÉGIA ---
-GATILHO_ATRASO_DUZIA = 11
+GATILHO_ATRASO_DUZIA = 10
 NUMEROS_PARA_ANALISE = 50
-GATILHO_CONFIANCA_IA_DUZIAS = 0.50 # 60% de confiança para o sinal de Dúzias
-GATILHO_CONFIANCA_IA_TOP5 = 0.25  # 15% de confiança somada para o sinal de Top 5
+GATILHO_CONFIANCA_IA_DUZIAS = 0.50 
+GATILHO_CONFIANCA_IA_TOP5 = 0.25
 SEQUENCE_LENGTH_IA_DUZIAS = 10
 SEQUENCE_LENGTH_IA_NUMEROS = 15
 
@@ -195,6 +195,18 @@ async def processar_numero(bot, numero, numero_anterior):
     if active_strategy_state["active"]: await handle_active_strategy(bot, numero)
     else: await check_for_new_triggers(bot, numero, numero_anterior)
 
+def analisar_atraso_duzias(numeros_recentes):
+    if len(numeros_recentes) < GATILHO_ATRASO_DUZIA: return None, 0
+    atrasos = {1: -1, 2: -1, 3: -1}
+    for i, numero in enumerate(numeros_recentes):
+        _, duzia, _, _ = get_properties(numero)
+        if duzia in atrasos and atrasos[duzia] == -1: atrasos[duzia] = i
+        if all(v != -1 for v in atrasos.values()): break
+    for duzia in atrasos:
+        if atrasos[duzia] == -1: atrasos[duzia] = len(numeros_recentes)
+    duzia_atrasada = max(atrasos, key=atrasos.get)
+    return duzia_atrasada, atrasos[duzia_atrasada]
+
 def format_score_message(title="📊 *Placar do Dia* 📊"):
     messages = [title]; overall_wins, overall_losses = 0, 0
     for name, score in daily_score.items():
@@ -237,6 +249,39 @@ async def check_and_reset_daily_score(bot):
         daily_score = initialize_score(); daily_play_history.clear(); reset_daily_messages_tracker()
         await send_message_to_all(bot, "☀️ Bom dia! Um novo dia de análises está começando.")
 
+# --- FUNÇÕES QUE FALTAVAM (RE-ADICIONADAS) ---
+def calculate_streaks_for_period(start_time, end_time):
+    plays_in_period = [p['result'] for p in daily_play_history if start_time <= p['time'].time() < end_time]
+    if not plays_in_period: return {"max_wins": 0, "max_losses": 0}
+    max_wins, current_wins, max_losses, current_losses = 0, 0, 0, 0
+    for result in plays_in_period:
+        if result == 'win': current_wins += 1; current_losses = 0
+        else: current_losses += 1; current_wins = 0
+        if current_wins > max_wins: max_wins = current_wins
+        if current_losses > max_losses: max_losses = current_losses
+    return {"max_wins": max_wins, "max_losses": max_losses}
+
+async def check_and_send_period_messages(bot):
+    global daily_messages_sent
+    now_br = datetime.now(FUSO_HORARIO_BRASIL)
+    if now_br.hour >= HORA_TARDE and not daily_messages_sent.get("tarde"):
+        logging.info("Enviando mensagem do período da tarde.")
+        partial_score = format_score_message(title="📊 *Placar Parcial (Manhã)* 📊")
+        streaks = calculate_streaks_for_period(dt_time.min, dt_time(hour=11, minute=59, second=59))
+        streak_report = f"\n\nSequência Máx. de Vitórias: *{streaks['max_wins']}* ✅\nSequência Máx. de Derrotas: *{streaks['max_losses']}* ❌"
+        message = f"☀️ Período da tarde iniciando!\n\nNossa parcial da **MANHÃ** foi:\n{partial_score}{streak_report}"
+        await send_message_to_all(bot, message, parse_mode=ParseMode.MARKDOWN)
+        daily_messages_sent["tarde"] = True
+    if now_br.hour >= HORA_NOITE and not daily_messages_sent.get("noite"):
+        logging.info("Enviando mensagem do período da noite.")
+        partial_score = format_score_message(title="📊 *Placar Parcial (Tarde)* 📊")
+        streaks = calculate_streaks_for_period(dt_time(hour=12), dt_time(hour=17, minute=59, second=59))
+        streak_report = f"\n\nSequência Máx. de Vitórias (Tarde): *{streaks['max_wins']}* ✅\nSequência Máx. de Derrotas (Tarde): *{streaks['max_losses']}* ❌"
+        message = f"🌙 Período da noite iniciando!\n\nNossa parcial da **TARDE** foi:\n{partial_score}{streak_report}"
+        await send_message_to_all(bot, message, parse_mode=ParseMode.MARKDOWN)
+        daily_messages_sent["noite"] = True
+# ---------------------------------------------------
+
 def build_base_signal_message():
     name = active_strategy_state['strategy_name']; winning_numbers = active_strategy_state['winning_numbers']; trigger_info = active_strategy_state.get('trigger_info', '')
     if name == "Estratégia Atraso de Dúzias":
@@ -254,28 +299,25 @@ def build_base_signal_message():
     return ""
 
 async def handle_win(bot, final_number):
-    # ... (código sem alterações)
     daily_play_history.append({'time': datetime.now(FUSO_HORARIO_BRASIL), 'result': 'win'})
     strategy_name = active_strategy_state["strategy_name"]; win_level = active_strategy_state["martingale_level"]
     if win_level == 0: daily_score[strategy_name]["wins_sg"] += 1; win_type_message = "Vitória sem Gale!"
     else: daily_score[strategy_name][f"wins_g{win_level}"] += 1; win_type_message = f"Vitória no {win_level}º Martingale"
-    mensagem_final = (f"✅ *VITÓRIA!*\n\n*{win_type_message}*\n_Estratégia: {strategy_name}_\n_Análise: {active_strategy_state['trigger_info']}_\nSaiu: *{final_number}*\n\n{format_score_message()}")
+    trigger_display = active_strategy_state.get('trigger_number', 'N/A')
+    mensagem_final = (f"✅ *VITÓRIA!*\n\n*{win_type_message}*\n_Estratégia: {strategy_name}_\n_Gatilho: {trigger_display}_\nSaiu: *{final_number}*\n\n{format_score_message()}")
     await edit_play_messages(bot, mensagem_final, parse_mode=ParseMode.MARKDOWN); reset_strategy_state()
 
-
 async def handle_loss(bot, final_number):
-    # ... (código sem alterações)
     daily_play_history.append({'time': datetime.now(FUSO_HORARIO_BRASIL), 'result': 'loss'})
     strategy_name = active_strategy_state["strategy_name"]; daily_score[strategy_name]["losses"] += 1
-    mensagem_final = (f"❌ *LOSS!*\n\n_Estratégia: {strategy_name}_\n_Análise: {active_strategy_state['trigger_info']}_\nSaiu: *{final_number}*\n\n{format_score_message()}")
+    trigger_display = active_strategy_state.get('trigger_number', 'N/A')
+    mensagem_final = (f"❌ *LOSS!*\n\n_Estratégia: {strategy_name}_\n_Gatilho: {trigger_display}_\nSaiu: *{final_number}*\n\n{format_score_message()}")
     await edit_play_messages(bot, mensagem_final, parse_mode=ParseMode.MARKDOWN); reset_strategy_state()
 
 async def handle_martingale(bot, current_number):
-    # ... (código sem alterações)
     level = active_strategy_state["martingale_level"]; base_message = build_base_signal_message()
     mensagem_editada = (f"{base_message}\n\n------------------------------------\n⏳ *Análise: Entrar no {level}º Martingale...*\nO número *{current_number}* não pagou.")
     await edit_play_messages(bot, mensagem_editada, parse_mode=ParseMode.MARKDOWN)
-
 
 async def handle_active_strategy(bot, numero):
     _, duzia_do_numero, _, _ = get_properties(numero); winning_numbers = active_strategy_state["winning_numbers"]
@@ -294,20 +336,17 @@ async def check_for_new_triggers(bot, numero, numero_anterior):
     numeros_recentes = buscar_numeros_recentes_para_analise(max_len)
     
     # Ordem de prioridade das estratégias
-    # 1. IA Top 5 (maior potencial de lucro)
     top_5, conf_top5 = analisar_ia_top5(numeros_recentes)
     if top_5 is not None and conf_top5 >= GATILHO_CONFIANCA_IA_TOP5:
         logging.info(f"Gatilho IA Top 5! Confiança: {conf_top5:.1%}. Números: {top_5}")
-        active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Top 5 Números", "winning_numbers": top_5, "trigger_number": ", ".join(map(str,top_5)), "trigger_info": conf_top5 })
+        active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Top 5 Números", "winning_numbers": top_5, "trigger_number": ", ".join(map(str,sorted(top_5))), "trigger_info": conf_top5 })
     
-    # 2. IA Dúzias
-    elif MODELO_IA_DUZIAS: # Apenas checa se o modelo existe
+    elif MODELO_IA_DUZIAS:
         duzia_ia, conf_duzia = analisar_ia_duzias(numeros_recentes)
         if duzia_ia is not None and conf_duzia >= GATILHO_CONFIANCA_IA_DUZIAS:
             logging.info(f"Gatilho IA Dúzias! Dúzia {duzia_ia} com {conf_duzia:.1%} de confiança.")
             active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Dúzias", "winning_numbers": DUZIAS[duzia_ia], "trigger_number": duzia_ia, "trigger_info": conf_duzia })
 
-    # 3. Atraso de Dúzias
     else:
         duzia_atrasada, atraso = analisar_atraso_duzias(numeros_recentes)
         if atraso >= GATILHO_ATRASO_DUZIA:
@@ -315,7 +354,6 @@ async def check_for_new_triggers(bot, numero, numero_anterior):
             winning_numbers = DUZIAS[duzia_atrasada].copy(); winning_numbers.append(0)
             active_strategy_state.update({"active": True, "strategy_name": "Estratégia Atraso de Dúzias", "winning_numbers": winning_numbers, "trigger_number": duzia_atrasada, "trigger_info": atraso })
 
-    # Se qualquer estratégia foi ativada, envia a mensagem
     if active_strategy_state["active"]:
         mensagem = f"{build_base_signal_message()}\n\n[🔗 Fazer Aposta]({URL_APOSTA})\n---\n{format_score_message()}"
         await send_and_track_play_message(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
@@ -323,8 +361,8 @@ async def check_for_new_triggers(bot, numero, numero_anterior):
 async def work_session(bot):
     work_duration_minutes = random.randint(WORK_MIN_MINUTES, WORK_MAX_MINUTES)
     session_end_time = datetime.now(FUSO_HORARIO_BRASIL) + timedelta(minutes=work_duration_minutes)
-    logging.info(f"Iniciando nova sessão (API) que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
-    await send_message_to_all(bot, f"Monitoramento de ciclos (API) previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
+    logging.info(f"Iniciando nova sessão que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
+    await send_message_to_all(bot, f"Monitoramento de ciclos previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
     while datetime.now(FUSO_HORARIO_BRASIL) < session_end_time:
         numero, numero_anterior = buscar_ultimo_numero_api()
         if numero is not None: await processar_numero(bot, numero, numero_anterior)
