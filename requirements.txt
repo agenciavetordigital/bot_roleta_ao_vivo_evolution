@@ -2,3 +2,6 @@ python-telegram-bot==20.6
 pytz
 psycopg2-binary
 requests
+pandas
+scikit-learn
+joblib
