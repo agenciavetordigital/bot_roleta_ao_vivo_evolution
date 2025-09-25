@@ -33,7 +33,7 @@ MAX_MARTINGALES = 2
 # --- CONFIGURAÇÕES DE ESTRATÉGIA ---
 GATILHO_ATRASO_DUZIA = 11
 NUMEROS_PARA_ANALISE = 50
-GATILHO_CONFIANCA_IA = 0.80  # 45% de confiança mínima para o sinal de IA
+GATILHO_CONFIANCA_IA = 0.60  # 45% de confiança mínima para o sinal de IA
 SEQUENCE_LENGTH_IA = 10     # Deve ser o mesmo valor do script de treino
 
 # --- CONFIGURAÇÕES DE HUMANIZAÇÃO E HORA ---
@@ -358,3 +358,4 @@ if __name__ == '__main__':
     try: asyncio.run(supervisor())
     except KeyboardInterrupt: logging.info("Bot encerrado manualmente.")
     except Exception as e: logging.critical(f"Erro fatal no supervisor: {e}")
+
