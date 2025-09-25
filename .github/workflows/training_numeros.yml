@@ -1,0 +1,28 @@
+name: Treinamento Diário do Modelo de Números
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * *' # Roda todo dia às 5h da manhã
+
+permissions:
+  contents: write
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: pip install pandas scikit-learn joblib psycopg2-binary
+      - name: Rodar script de treinamento de números
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python train_model_numeros.py
+      - name: Comitar e fazer push do modelo de números
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "[Auto] Atualiza modelo de IA (Números)"
+          file_pattern: modelo_numeros.pkl
