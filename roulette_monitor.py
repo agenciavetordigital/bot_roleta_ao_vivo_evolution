@@ -36,7 +36,7 @@ MAX_MARTINGALES = 2
 GATILHO_ATRASO_DUZIA = 10
 NUMEROS_PARA_ANALISE = 50
 GATILHO_CONFIANCA_IA_DUZIAS = 0.50 
-GATILHO_CONFIANCA_IA_TOP5 = 0.25
+GATILHO_CONFIANCA_IA_TOP5 = 0.40
 SEQUENCE_LENGTH_IA_DUZIAS = 10
 SEQUENCE_LENGTH_IA_NUMEROS = 15
 
@@ -395,3 +395,4 @@ if __name__ == '__main__':
     try: asyncio.run(supervisor())
     except KeyboardInterrupt: logging.info("Bot encerrado manualmente.")
     except Exception as e: logging.critical(f"Erro fatal no supervisor: {e}")
+
