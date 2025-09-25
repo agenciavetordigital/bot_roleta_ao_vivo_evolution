@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
+# VERSÃO FINAL COM MÚLTIPLAS ESTRATÉGIAS DE IA
 
-# --- IMPORTAÇÕES PADRÃO E DE LIBS ---
+# --- IMPORTAÇÕES ---
 import os
 import time
 import logging
@@ -15,6 +16,7 @@ import psycopg2
 from urllib.parse import urlparse
 import pandas as pd
 import joblib
+import numpy as np
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
@@ -33,35 +35,35 @@ MAX_MARTINGALES = 2
 # --- CONFIGURAÇÕES DE ESTRATÉGIA ---
 GATILHO_ATRASO_DUZIA = 11
 NUMEROS_PARA_ANALISE = 50
-GATILHO_CONFIANCA_IA = 0.50  # 45% de confiança mínima para o sinal de IA
-SEQUENCE_LENGTH_IA = 10     # Deve ser o mesmo valor do script de treino
+GATILHO_CONFIANCA_IA_DUZIAS = 0.50 # 60% de confiança para o sinal de Dúzias
+GATILHO_CONFIANCA_IA_TOP5 = 0.25  # 15% de confiança somada para o sinal de Top 5
+SEQUENCE_LENGTH_IA_DUZIAS = 10
+SEQUENCE_LENGTH_IA_NUMEROS = 15
 
-# --- CONFIGURAÇÕES DE HUMANIZAÇÃO E HORA ---
+# --- CONFIGURAÇÕES DE HUMANIZAÇÃO ---
 FUSO_HORARIO_BRASIL = pytz.timezone('America/Sao_Paulo')
 WORK_MIN_MINUTES = 3 * 60; WORK_MAX_MINUTES = 5 * 60
 BREAK_MIN_MINUTES = 25; BREAK_MAX_MINUTES = 45
 HORA_TARDE = 12; HORA_NOITE = 18
 
-# --- MODELO DE IA (carregado na inicialização) ---
-MODELO_IA = None
+# --- MODELOS DE IA ---
+MODELO_IA_DUZIAS = None
+MODELO_IA_NUMEROS = None
 
 # --- FUNÇÕES DE BANCO DE DADOS E PROPRIEDADES ---
 def get_db_connection():
     try:
-        result = urlparse(DATABASE_URL)
-        conn = psycopg2.connect(database=result.path[1:], user=result.username, password=result.password, host=result.hostname, port=result.port)
+        result = urlparse(DATABASE_URL); conn = psycopg2.connect(database=result.path[1:], user=result.username, password=result.password, host=result.hostname, port=result.port)
         return conn
-    except (Exception, psycopg2.Error) as error:
-        logging.error(f"Erro ao conectar ao PostgreSQL: {error}")
-        return None
+    except Exception as e: logging.error(f"Erro ao conectar ao PostgreSQL: {e}"); return None
 
 def inicializar_db_postgres():
     conn = get_db_connection()
     if conn is not None:
         try:
             with conn.cursor() as cur: cur.execute('CREATE TABLE IF NOT EXISTS resultados (id SERIAL PRIMARY KEY, numero INTEGER, cor VARCHAR(10), duzia INTEGER, coluna INTEGER, paridade VARCHAR(10), timestamp TIMESTAMPTZ DEFAULT NOW());'); conn.commit()
-            logging.info("Banco de dados e tabela 'resultados' verificados/criados com sucesso.")
-        except (Exception, psycopg2.DatabaseError) as error: logging.error(f"Erro ao inicializar a tabela: {error}")
+            logging.info("Banco de dados e tabela 'resultados' verificados.")
+        except Exception as e: logging.error(f"Erro ao inicializar a tabela: {e}")
         finally: conn.close()
 
 def get_properties(numero):
@@ -79,8 +81,8 @@ def salvar_numero_postgres(numero):
     if conn is not None:
         try:
             with conn.cursor() as cur: cur.execute(sql, (numero, cor, duzia, coluna, paridade)); conn.commit()
-            logging.info(f"Número {numero} salvo no banco de dados PostgreSQL.")
-        except (Exception, psycopg2.DatabaseError) as error: logging.error(f"Erro ao salvar número no DB: {error}")
+            logging.info(f"Número {numero} salvo no PostgreSQL.")
+        except Exception as e: logging.error(f"Erro ao salvar número no DB: {e}")
         finally: conn.close()
 
 def buscar_numeros_recentes_para_analise(limite=NUMEROS_PARA_ANALISE):
@@ -89,75 +91,76 @@ def buscar_numeros_recentes_para_analise(limite=NUMEROS_PARA_ANALISE):
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT numero FROM resultados ORDER BY id DESC LIMIT %s;", (limite,))
-            resultados = cur.fetchall()
-            return [item[0] for item in resultados]
-    except (Exception, psycopg2.DatabaseError) as error: logging.error(f"Erro ao buscar números recentes do DB: {error}"); return []
+            return [item[0] for item in cur.fetchall()]
+    except Exception as e: logging.error(f"Erro ao buscar números recentes: {e}"); return []
     finally: conn.close()
-
-# --- NOVAS FUNÇÕES DE MACHINE LEARNING ---
-def carregar_modelo_ia():
-    global MODELO_IA
+    
+# --- FUNÇÕES DE MACHINE LEARNING ---
+def carregar_modelos_ia():
+    global MODELO_IA_DUZIAS, MODELO_IA_NUMEROS
     try:
-        MODELO_IA = joblib.load('modelo_ia.pkl')
-        logging.info("🧠 Modelo de Inteligência Artificial carregado com sucesso!")
+        MODELO_IA_DUZIAS = joblib.load('modelo_duzias.pkl')
+        logging.info("🧠 Modelo de IA (Dúzias) carregado com sucesso!")
     except FileNotFoundError:
-        logging.warning("Arquivo 'modelo_ia.pkl' não encontrado. A Estratégia de IA ficará desativada até o modelo ser treinado e adicionado ao projeto.")
+        logging.warning("Arquivo 'modelo_duzias.pkl' não encontrado. Estratégia correspondente desativada.")
     except Exception as e:
-        logging.error(f"Erro ao carregar o modelo de IA: {e}")
-
-def analisar_com_ia(numeros_recentes):
-    if MODELO_IA is None: return None, 0
-    if len(numeros_recentes) < SEQUENCE_LENGTH_IA: return None, 0
+        logging.error(f"Erro ao carregar o modelo de Dúzias: {e}")
 
     try:
-        # 1. Preparar os dados exatamente como no treino
-        dados_sequencia = numeros_recentes[:SEQUENCE_LENGTH_IA]
+        MODELO_IA_NUMEROS = joblib.load('modelo_numeros.pkl')
+        logging.info("🧠 Modelo de IA (Números) carregado com sucesso!")
+    except FileNotFoundError:
+        logging.warning("Arquivo 'modelo_numeros.pkl' não encontrado. Estratégia correspondente desativada.")
+    except Exception as e:
+        logging.error(f"Erro ao carregar o modelo de Números: {e}")
+
+def analisar_ia_duzias(numeros_recentes):
+    if MODELO_IA_DUZIAS is None or len(numeros_recentes) < SEQUENCE_LENGTH_IA_DUZIAS: return None, 0
+    try:
+        dados_sequencia = numeros_recentes[:SEQUENCE_LENGTH_IA_DUZIAS]
         features_dict = {}
         for i, numero in enumerate(dados_sequencia):
             _, duzia, _, _ = get_properties(numero)
             features_dict[f'duzia_lag_{i+1}'] = duzia
-        
         df_features = pd.DataFrame([features_dict])
-
-        # 2. Fazer a previsão e pegar a probabilidade
-        predicao = MODELO_IA.predict(df_features)[0]
-        probabilidades = MODELO_IA.predict_proba(df_features)[0]
-        
-        # 3. Encontrar a confiança da previsão
-        indice_predicao = list(MODELO_IA.classes_).index(predicao)
+        predicao = MODELO_IA_DUZIAS.predict(df_features)[0]
+        probabilidades = MODELO_IA_DUZIAS.predict_proba(df_features)[0]
+        indice_predicao = list(MODELO_IA_DUZIAS.classes_).index(predicao)
         confianca = probabilidades[indice_predicao]
-
         return int(predicao), confianca
-    except Exception as e:
-        logging.error(f"Erro durante a análise com IA: {e}")
-        return None, 0
+    except Exception as e: logging.error(f"Erro na análise com IA de Dúzias: {e}"); return None, 0
 
-# (O resto do código continua o mesmo, com pequenas adições no placar e na verificação de estratégias)
-# ... (código anterior do bot aqui) ...
-# ... (aqui entraria todo o restante do seu código .py, mas com as modificações abaixo)
+def analisar_ia_top5(numeros_recentes):
+    if MODELO_IA_NUMEROS is None or len(numeros_recentes) < SEQUENCE_LENGTH_IA_NUMEROS: return None, 0
+    try:
+        dados_sequencia = numeros_recentes[:SEQUENCE_LENGTH_IA_NUMEROS]
+        features_dict = {}
+        for i, numero in enumerate(dados_sequencia):
+            cor, duzia, _, paridade = get_properties(numero)
+            features_dict[f'numero_lag_{i+1}'] = numero; features_dict[f'duzia_lag_{i+1}'] = duzia
+            features_dict[f'cor_preto_lag_{i+1}'] = 1 if cor == 'Preto' else 0
+            features_dict[f'paridade_par_lag_{i+1}'] = 1 if paridade == 'Par' else 0
+        df_features = pd.DataFrame([features_dict])
+        probabilidades = MODELO_IA_NUMEROS.predict_proba(df_features)[0]
+        classes = MODELO_IA_NUMEROS.classes_
+        prob_map = {classes[i]: probabilidades[i] for i in range(len(classes))}
+        top_5_numeros = sorted(prob_map, key=prob_map.get, reverse=True)[:5]
+        confianca_somada = sum(prob_map[num] for num in top_5_numeros)
+        return top_5_numeros, confianca_somada
+    except Exception as e: logging.error(f"Erro na análise com IA de Números: {e}"); return None, 0
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
 DUZIAS = { 1: list(range(1, 13)), 2: list(range(13, 25)), 3: list(range(25, 37)) }
-STRATEGY_MENOS_FICHAS_NEIGHBORS = { 2: [15, 19, 4, 21, 2, 25, 17, 34, 6], 7: [9, 22, 18, 29, 7, 28, 12, 35, 3], 12: [18, 29, 7, 28, 12, 35, 3, 26, 0], 17: [4, 21, 2, 25, 17, 34, 6, 27, 13], 22: [20, 14, 31, 9, 22, 18, 29, 7, 28], 27: [25, 17, 34, 6, 27, 13, 36, 11, 30], 32: [35, 3, 26, 0, 32, 15, 19, 4, 21], 11: [6, 27, 13, 36, 11, 30, 8, 23, 10], 16: [23, 10, 5, 24, 16, 33, 1, 20, 14], 25: [19, 4, 21, 2, 25, 17, 34, 6, 27], 34: [21, 2, 25, 17, 34, 6, 27, 13, 36]}
-def get_winners_menos_fichas(trigger_number):
-    winners = STRATEGY_MENOS_FICHAS_NEIGHBORS.get(trigger_number, [])
-    if 0 not in winners: winners.append(0)
-    return winners
-ESTRATEGIAS_FIXAS = { "Estratégia Menos Fichas": { "triggers": list(STRATEGY_MENOS_FICHAS_NEIGHBORS.keys()), "filter": [], "get_winners": get_winners_menos_fichas }}
 
 # --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-ultimo_numero_processado_api = None
-numero_anterior_estrategia = None
-daily_play_history = []
-daily_messages_sent = {}
-active_strategy_state = {}
+ultimo_numero_processado_api, numero_anterior_estrategia, daily_play_history, daily_messages_sent, active_strategy_state = None, None, [], {}, {}
 
 def reset_daily_messages_tracker(): global daily_messages_sent; daily_messages_sent = {"tarde": False, "noite": False}
 
 def initialize_score():
     score = {"last_check_date": datetime.now(FUSO_HORARIO_BRASIL).date()}
-    all_strategies = list(ESTRATEGIAS_FIXAS.keys()) + ["Estratégia Atraso de Dúzias", "Estratégia IA Dúzias"]
+    all_strategies = ["Estratégia Atraso de Dúzias", "Estratégia IA Dúzias", "Estratégia IA Top 5 Números"]
     for name in all_strategies: score[name] = {"wins_sg": 0, "wins_g1": 0, "wins_g2": 0, "losses": 0}
     return score
 daily_score = initialize_score()
@@ -165,14 +168,12 @@ daily_score = initialize_score()
 def reset_strategy_state():
     global active_strategy_state
     active_strategy_state = { "active": False, "strategy_name": "", "martingale_level": 0, "winning_numbers": [], "trigger_number": None, "play_message_ids": {}, "trigger_info": "" }
-reset_daily_messages_tracker()
-reset_strategy_state()
+reset_daily_messages_tracker(); reset_strategy_state()
 
 def buscar_ultimo_numero_api():
     global ultimo_numero_processado_api, numero_anterior_estrategia
     try:
-        cache_buster = int(time.time() * 1000)
-        url = f"https://api.jogosvirtual.com/jsons/historico_roletabrasileira.json?_={cache_buster}"
+        cache_buster = int(time.time() * 1000); url = f"https://api.jogosvirtual.com/jsons/historico_roletabrasileira.json?_={cache_buster}"
         response = requests.get(url, timeout=10); response.raise_for_status(); dados = response.json()
         lista_de_numeros = dados.get('baralhos', {}).get('0', [])
         if not lista_de_numeros: return None, None
@@ -193,18 +194,6 @@ async def processar_numero(bot, numero, numero_anterior):
     await check_and_reset_daily_score(bot)
     if active_strategy_state["active"]: await handle_active_strategy(bot, numero)
     else: await check_for_new_triggers(bot, numero, numero_anterior)
-
-def analisar_atraso_duzias(numeros_recentes):
-    if len(numeros_recentes) < GATILHO_ATRASO_DUZIA: return None, 0
-    atrasos = {1: -1, 2: -1, 3: -1}
-    for i, numero in enumerate(numeros_recentes):
-        _, duzia, _, _ = get_properties(numero)
-        if duzia in atrasos and atrasos[duzia] == -1: atrasos[duzia] = i
-        if all(v != -1 for v in atrasos.values()): break
-    for duzia in atrasos:
-        if atrasos[duzia] == -1: atrasos[duzia] = len(numeros_recentes)
-    duzia_atrasada = max(atrasos, key=atrasos.get)
-    return duzia_atrasada, atrasos[duzia_atrasada]
 
 def format_score_message(title="📊 *Placar do Dia* 📊"):
     messages = [title]; overall_wins, overall_losses = 0, 0
@@ -242,49 +231,56 @@ async def check_and_reset_daily_score(bot):
     today_br = datetime.now(FUSO_HORARIO_BRASIL).date()
     if daily_score.get("last_check_date") != today_br:
         logging.info("Novo dia detectado! Enviando relatório e resetando placar.")
-        yesterday_str = daily_score.get("last_check_date", "dia anterior").strftime('%d/%m/%Y')
-        final_scores = format_score_message(title=f"📈 *Relatório Final do Dia {yesterday_str}* 📈")
-        streaks = calculate_streaks_for_period(dt_time.min, dt_time.max)
-        streak_report = f"\n\n*Resumo do Dia:*\nSequência Máx. de Vitórias: *{streaks['max_wins']}* ✅\nSequência Máx. de Derrotas: *{streaks['max_losses']}* ❌"
+        yesterday_str = daily_score.get("last_check_date", "dia anterior").strftime('%d/%m/%Y'); final_scores = format_score_message(title=f"📈 *Relatório Final do Dia {yesterday_str}* 📈")
+        streaks = calculate_streaks_for_period(dt_time.min, dt_time.max); streak_report = f"\n\n*Resumo do Dia:*\nSequência Máx. de Vitórias: *{streaks['max_wins']}* ✅\nSequência Máx. de Derrotas: *{streaks['max_losses']}* ❌"
         await send_message_to_all(bot, final_scores + streak_report, parse_mode=ParseMode.MARKDOWN)
         daily_score = initialize_score(); daily_play_history.clear(); reset_daily_messages_tracker()
         await send_message_to_all(bot, "☀️ Bom dia! Um novo dia de análises está começando.")
 
 def build_base_signal_message():
-    name = active_strategy_state['strategy_name']; numero = active_strategy_state['trigger_number']; winning_numbers = active_strategy_state['winning_numbers']
+    name = active_strategy_state['strategy_name']; winning_numbers = active_strategy_state['winning_numbers']; trigger_info = active_strategy_state.get('trigger_info', '')
     if name == "Estratégia Atraso de Dúzias":
         return (f"🎯 *Gatilho Estatístico Encontrado!* 🎯\n\n🎲 *Estratégia: {name}*\n"
-                f"📈 *Análise: Dúzia {numero} está atrasada há {active_strategy_state['trigger_info']} rodadas!*\n\n"
-                f"💰 *Apostar na Dúzia {numero}:*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
+                f"📈 *Análise: Dúzia {active_strategy_state['trigger_number']} está atrasada há {trigger_info} rodadas!*\n\n"
+                f"💰 *Apostar na Dúzia {active_strategy_state['trigger_number']} e no Zero:*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
     if name == "Estratégia IA Dúzias":
-        return (f"🤖 *Sinal de Inteligência Artificial!* 🤖\n\n🎲 *Estratégia: {name}*\n"
-                f"🧠 *Análise do Modelo: Dúzia {numero} com {active_strategy_state['trigger_info']:.1%} de confiança!*\n\n"
-                f"💰 *Apostar na Dúzia {numero}:*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
-    return (f"🎯 *Gatilho Encontrado!* 🎯\n\n🎲 *Estratégia: {name}*\n🔢 *Número Gatilho: {numero}*\n\n💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
+        return (f"🤖 *Sinal de IA (Dúzias)!* 🤖\n\n🎲 *Estratégia: {name}*\n"
+                f"🧠 *Análise do Modelo: Dúzia {active_strategy_state['trigger_number']} com {trigger_info:.1%} de confiança!*\n\n"
+                f"💰 *Apostar na Dúzia {active_strategy_state['trigger_number']}:*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
+    if name == "Estratégia IA Top 5 Números":
+        return (f"🤖 *Sinal de IA (Top 5)!* 🤖\n\n🎲 *Estratégia: {name}*\n"
+                f"🧠 *Análise do Modelo: Confiança de {trigger_info:.1%} nos seguintes números!*\n\n"
+                f"💰 *Apostar em:*\n`{', '.join(map(str, sorted(winning_numbers)))}`")
+    return ""
 
 async def handle_win(bot, final_number):
+    # ... (código sem alterações)
     daily_play_history.append({'time': datetime.now(FUSO_HORARIO_BRASIL), 'result': 'win'})
     strategy_name = active_strategy_state["strategy_name"]; win_level = active_strategy_state["martingale_level"]
     if win_level == 0: daily_score[strategy_name]["wins_sg"] += 1; win_type_message = "Vitória sem Gale!"
     else: daily_score[strategy_name][f"wins_g{win_level}"] += 1; win_type_message = f"Vitória no {win_level}º Martingale"
-    mensagem_final = (f"✅ *VITÓRIA!*\n\n*{win_type_message}*\n_Estratégia: {strategy_name}_\nGatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{final_number}*\n\n{format_score_message()}")
+    mensagem_final = (f"✅ *VITÓRIA!*\n\n*{win_type_message}*\n_Estratégia: {strategy_name}_\n_Análise: {active_strategy_state['trigger_info']}_\nSaiu: *{final_number}*\n\n{format_score_message()}")
     await edit_play_messages(bot, mensagem_final, parse_mode=ParseMode.MARKDOWN); reset_strategy_state()
 
+
 async def handle_loss(bot, final_number):
+    # ... (código sem alterações)
     daily_play_history.append({'time': datetime.now(FUSO_HORARIO_BRASIL), 'result': 'loss'})
     strategy_name = active_strategy_state["strategy_name"]; daily_score[strategy_name]["losses"] += 1
-    mensagem_final = (f"❌ *LOSS!*\n\n_Estratégia: {strategy_name}_\nGatilho: *{active_strategy_state['trigger_number']}* | Saiu: *{final_number}*\n\n{format_score_message()}")
+    mensagem_final = (f"❌ *LOSS!*\n\n_Estratégia: {strategy_name}_\n_Análise: {active_strategy_state['trigger_info']}_\nSaiu: *{final_number}*\n\n{format_score_message()}")
     await edit_play_messages(bot, mensagem_final, parse_mode=ParseMode.MARKDOWN); reset_strategy_state()
 
 async def handle_martingale(bot, current_number):
+    # ... (código sem alterações)
     level = active_strategy_state["martingale_level"]; base_message = build_base_signal_message()
     mensagem_editada = (f"{base_message}\n\n------------------------------------\n⏳ *Análise: Entrar no {level}º Martingale...*\nO número *{current_number}* não pagou.")
     await edit_play_messages(bot, mensagem_editada, parse_mode=ParseMode.MARKDOWN)
 
+
 async def handle_active_strategy(bot, numero):
     _, duzia_do_numero, _, _ = get_properties(numero); winning_numbers = active_strategy_state["winning_numbers"]
     is_win = numero in winning_numbers
-    if active_strategy_state['strategy_name'] in ["Estratégia Atraso de Dúzias", "Estratégia IA Dúzias"]:
+    if active_strategy_state['strategy_name'] == "Estratégia IA Dúzias":
         is_win = duzia_do_numero == active_strategy_state['trigger_number'] and numero != 0
 
     if is_win: await handle_win(bot, numero)
@@ -294,37 +290,40 @@ async def handle_active_strategy(bot, numero):
         else: await handle_loss(bot, numero)
 
 async def check_for_new_triggers(bot, numero, numero_anterior):
-    numeros_recentes = buscar_numeros_recentes_para_analise(max(NUMEROS_PARA_ANALISE, SEQUENCE_LENGTH_IA))
+    max_len = max(NUMEROS_PARA_ANALISE, SEQUENCE_LENGTH_IA_DUZIAS, SEQUENCE_LENGTH_IA_NUMEROS)
+    numeros_recentes = buscar_numeros_recentes_para_analise(max_len)
     
-    # 1. Estratégia de IA (maior prioridade)
-    duzia_ia, confianca_ia = analisar_com_ia(numeros_recentes)
-    if duzia_ia is not None and confianca_ia >= GATILHO_CONFIANCA_IA:
-        logging.info(f"Gatilho de IA encontrado! Dúzia {duzia_ia} com {confianca_ia:.1%} de confiança.")
-        active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Dúzias", "winning_numbers": DUZIAS[duzia_ia], "trigger_number": duzia_ia, "trigger_info": confianca_ia })
-        mensagem = f"{build_base_signal_message()}\n\n[🔗 Fazer Aposta]({URL_APOSTA})\n---\n{format_score_message()}"
-        await send_and_track_play_message(bot, mensagem, parse_mode=ParseMode.MARKDOWN); return
+    # Ordem de prioridade das estratégias
+    # 1. IA Top 5 (maior potencial de lucro)
+    top_5, conf_top5 = analisar_ia_top5(numeros_recentes)
+    if top_5 is not None and conf_top5 >= GATILHO_CONFIANCA_IA_TOP5:
+        logging.info(f"Gatilho IA Top 5! Confiança: {conf_top5:.1%}. Números: {top_5}")
+        active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Top 5 Números", "winning_numbers": top_5, "trigger_number": ", ".join(map(str,top_5)), "trigger_info": conf_top5 })
+    
+    # 2. IA Dúzias
+    elif MODELO_IA_DUZIAS: # Apenas checa se o modelo existe
+        duzia_ia, conf_duzia = analisar_ia_duzias(numeros_recentes)
+        if duzia_ia is not None and conf_duzia >= GATILHO_CONFIANCA_IA_DUZIAS:
+            logging.info(f"Gatilho IA Dúzias! Dúzia {duzia_ia} com {conf_duzia:.1%} de confiança.")
+            active_strategy_state.update({"active": True, "strategy_name": "Estratégia IA Dúzias", "winning_numbers": DUZIAS[duzia_ia], "trigger_number": duzia_ia, "trigger_info": conf_duzia })
 
-    # 2. Estratégia de Atraso de Dúzia
-    duzia_atrasada, atraso = analisar_atraso_duzias(numeros_recentes)
-    if atraso >= GATILHO_ATRASO_DUZIA:
-        logging.info(f"Gatilho de Atraso de Dúzia encontrado! Dúzia {duzia_atrasada} a {atraso} rodadas.")
-        active_strategy_state.update({"active": True, "strategy_name": "Estratégia Atraso de Dúzias", "winning_numbers": DUZIAS[duzia_atrasada], "trigger_number": duzia_atrasada, "trigger_info": atraso })
-        mensagem = f"{build_base_signal_message()}\n\n[🔗 Fazer Aposta]({URL_APOSTA})\n---\n{format_score_message()}"
-        await send_and_track_play_message(bot, mensagem, parse_mode=ParseMode.MARKDOWN); return
+    # 3. Atraso de Dúzias
+    else:
+        duzia_atrasada, atraso = analisar_atraso_duzias(numeros_recentes)
+        if atraso >= GATILHO_ATRASO_DUZIA:
+            logging.info(f"Gatilho Atraso de Dúzia! Dúzia {duzia_atrasada} a {atraso} rodadas.")
+            winning_numbers = DUZIAS[duzia_atrasada].copy(); winning_numbers.append(0)
+            active_strategy_state.update({"active": True, "strategy_name": "Estratégia Atraso de Dúzias", "winning_numbers": winning_numbers, "trigger_number": duzia_atrasada, "trigger_info": atraso })
 
-    # 3. Estratégias Fixas
-    for name, details in ESTRATEGIAS_FIXAS.items():
-        if numero in details["triggers"]:
-            if details.get("filter") and numero_anterior is not None and numero_anterior in details["filter"]:
-                logging.info(f"Gatilho {numero} ignorado para '{name}' devido ao filtro."); continue
-            active_strategy_state.update({ "active": True, "strategy_name": name, "winning_numbers": details["get_winners"](numero), "trigger_number": numero })
-            mensagem = f"{build_base_signal_message()}\n\n[🔗 Fazer Aposta]({URL_APOSTA})\n---\n{format_score_message()}"
-            await send_and_track_play_message(bot, mensagem, parse_mode=ParseMode.MARKDOWN); return
+    # Se qualquer estratégia foi ativada, envia a mensagem
+    if active_strategy_state["active"]:
+        mensagem = f"{build_base_signal_message()}\n\n[🔗 Fazer Aposta]({URL_APOSTA})\n---\n{format_score_message()}"
+        await send_and_track_play_message(bot, mensagem, parse_mode=ParseMode.MARKDOWN)
 
 async def work_session(bot):
     work_duration_minutes = random.randint(WORK_MIN_MINUTES, WORK_MAX_MINUTES)
     session_end_time = datetime.now(FUSO_HORARIO_BRASIL) + timedelta(minutes=work_duration_minutes)
-    logging.info(f"Iniciando nova sessão de trabalho (API) que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
+    logging.info(f"Iniciando nova sessão (API) que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
     await send_message_to_all(bot, f"Monitoramento de ciclos (API) previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
     while datetime.now(FUSO_HORARIO_BRASIL) < session_end_time:
         numero, numero_anterior = buscar_ultimo_numero_api()
@@ -334,10 +333,11 @@ async def work_session(bot):
 
 async def supervisor():
     bot = telegram.Bot(token=TOKEN_BOT)
-    try: await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online (API Mode)!\nIniciando gerenciamento de ciclos.")
+    try: await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online !\nIniciando gerenciamento de ciclos.")
     except Exception as e: logging.critical(f"Não foi possível conectar ao Telegram na inicialização: {e}")
     while True:
         try:
+            await check_and_send_period_messages(bot)
             await work_session(bot)
             break_duration_minutes = random.randint(BREAK_MIN_MINUTES, BREAK_MAX_MINUTES)
             logging.info(f"Iniciando pausa de {break_duration_minutes} minutos.")
@@ -347,16 +347,13 @@ async def supervisor():
             await send_message_to_all(bot, f"✅ Sistema operante novamente!")
         except Exception as e:
             import traceback; tb_str = traceback.format_exc()
-            logging.critical(f"O processo supervisor falhou! Erro: {e}\nTraceback:\n{tb_str}")
-            await asyncio.sleep(60)
+            logging.critical(f"O processo supervisor falhou! Erro: {e}\nTraceback:\n{tb_str}"); await asyncio.sleep(60)
 
 if __name__ == '__main__':
     logging.info("Verificando e inicializando o banco de dados PostgreSQL...")
     inicializar_db_postgres()
-    logging.info("Carregando modelo de Inteligência Artificial...")
-    carregar_modelo_ia()
+    logging.info("Carregando modelos de Inteligência Artificial...")
+    carregar_modelos_ia()
     try: asyncio.run(supervisor())
     except KeyboardInterrupt: logging.info("Bot encerrado manualmente.")
     except Exception as e: logging.critical(f"Erro fatal no supervisor: {e}")
-
-
