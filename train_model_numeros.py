@@ -63,14 +63,16 @@ def train_model():
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
-    model = RandomForestClassifier(n_estimators=200, random_state=42, class_weight='balanced', min_samples_leaf=3, n_jobs=-1)
+    print("Treinando o modelo RandomForestClassifier para 37 classes...")
+    # --- PARÂMETROS AJUSTADOS PARA REDUZIR O TAMANHO DO ARQUIVO ---
+    model = RandomForestClassifier(n_estimators=100, max_depth=15, random_state=42, class_weight='balanced', min_samples_leaf=3, n_jobs=-1)
     model.fit(X_train, y_train)
     
     accuracy = accuracy_score(y_test, model.predict(X_test))
     print(f"Acurácia do modelo de Números (Top 1): {accuracy:.2%}")
     
     joblib.dump(model, 'modelo_numeros.pkl')
-    print("Modelo de Números salvo como 'modelo_numeros.pkl'")
+    print("Modelo de Números (versão leve) salvo como 'modelo_numeros.pkl'")
 
 if __name__ == '__main__':
     train_model()
