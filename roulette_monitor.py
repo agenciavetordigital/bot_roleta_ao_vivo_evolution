@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# VERSÃO FINAL COM COBERTURA DO ZERO EM TODAS AS ESTRATÉGIAS
+# VERSÃO FINAL COM MÚLTIPLAS ESTRATÉGIAS DE IA
 
 # --- IMPORTAÇÕES ---
 import os
@@ -33,12 +33,12 @@ INTERVALO_VERIFICACAO_API = 5
 MAX_MARTINGALES = 2
 
 # --- CONFIGURAÇÕES DE ESTRATÉGIA ---
-GATILHO_ATRASO_DUZIA = 11
+GATILHO_ATRASO_DUZIA = 10
 NUMEROS_PARA_ANALISE = 50
-GATILHO_CONFIANCA_IA_DUZIAS = 0.50 
-GATILHO_CONFIANCA_IA_TOP5 = 0.30
-SEQUENCE_LENGTH_IA_DUZIAS = 10
-SEQUENCE_LENGTH_IA_NUMEROS = 15
+GATILHO_CONFIANCA_IA_DUZIAS = 0.50
+GATILHO_CONFIANCA_IA_TOP5 = 0.25
+SEQUENCE_LENGTH_IA_DUZIAS = 15
+SEQUENCE_LENGTH_IA_NUMEROS = 20
 
 # --- CONFIGURAÇÕES DE HUMANIZAÇÃO ---
 FUSO_HORARIO_BRASIL = pytz.timezone('America/Sao_Paulo')
@@ -318,7 +318,12 @@ async def handle_martingale(bot, current_number):
     await edit_play_messages(bot, mensagem_editada, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_active_strategy(bot, numero):
-    if numero in active_strategy_state["winning_numbers"]: await handle_win(bot, numero)
+    _, duzia_do_numero, _, _ = get_properties(numero); winning_numbers = active_strategy_state["winning_numbers"]
+    is_win = numero in winning_numbers
+    if active_strategy_state['strategy_name'] == "Estratégia IA Dúzias":
+        is_win = duzia_do_numero == active_strategy_state['trigger_number'] and numero != 0
+
+    if is_win: await handle_win(bot, numero)
     else:
         active_strategy_state["martingale_level"] += 1
         if active_strategy_state["martingale_level"] <= MAX_MARTINGALES: await handle_martingale(bot, numero)
@@ -328,7 +333,6 @@ async def check_for_new_triggers(bot, numero, numero_anterior):
     max_len = max(NUMEROS_PARA_ANALISE, SEQUENCE_LENGTH_IA_DUZIAS, SEQUENCE_LENGTH_IA_NUMEROS)
     numeros_recentes = buscar_numeros_recentes_para_analise(max_len)
     
-    # Ordem de prioridade das estratégias
     top_5, conf_top5 = analisar_ia_top5(numeros_recentes)
     if top_5 is not None and conf_top5 >= GATILHO_CONFIANCA_IA_TOP5:
         logging.info(f"Gatilho IA Top 5! Confiança: {conf_top5:.1%}. Números: {top_5}")
@@ -358,28 +362,29 @@ async def check_for_new_triggers(bot, numero, numero_anterior):
 async def work_session(bot):
     work_duration_minutes = random.randint(WORK_MIN_MINUTES, WORK_MAX_MINUTES)
     session_end_time = datetime.now(FUSO_HORARIO_BRASIL) + timedelta(minutes=work_duration_minutes)
-    logging.info(f"Iniciando nova sessão que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
+    logging.info(f"Iniciando nova sessão Boot Venon que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
     await send_message_to_all(bot, f"Monitoramento de ciclos previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
     while datetime.now(FUSO_HORARIO_BRASIL) < session_end_time:
+        await check_and_send_period_messages(bot) # <-- CORREÇÃO AQUI
         numero, numero_anterior = buscar_ultimo_numero_api()
         if numero is not None: await processar_numero(bot, numero, numero_anterior)
         await asyncio.sleep(INTERVALO_VERIFICACAO_API)
-    logging.info("Sessão de trabalho concluída.")
+    logging.info("Sessão de trabalho Boot Venon concluída.")
 
 async def supervisor():
     bot = telegram.Bot(token=TOKEN_BOT)
-    try: await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online !\nIniciando gerenciamento de ciclos.")
+    try: await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online Boot Venon!\nIniciando gerenciamento de ciclos.")
     except Exception as e: logging.critical(f"Não foi possível conectar ao Telegram na inicialização: {e}")
     while True:
         try:
-            await check_and_send_period_messages(bot) # <-- Chamada estava faltando aqui
+            # await check_and_send_period_messages(bot) <-- REMOVIDO DAQUI
             await work_session(bot)
             break_duration_minutes = random.randint(BREAK_MIN_MINUTES, BREAK_MAX_MINUTES)
             logging.info(f"Iniciando pausa de {break_duration_minutes} minutos.")
-            await send_message_to_all(bot, f"⏸️ Pausa programada para manutenção.\nDuração: *{break_duration_minutes} minutos*.", parse_mode=ParseMode.MARKDOWN)
+            await send_message_to_all(bot, f"⏸️ Pausa programada para manutenção Boot Venon.\nDuração: *{break_duration_minutes} minutos*.", parse_mode=ParseMode.MARKDOWN)
             await asyncio.sleep(break_duration_minutes * 60)
             logging.info("Pausa finalizada. Iniciando nova sessão.")
-            await send_message_to_all(bot, f"✅ Sistema operante novamente!")
+            await send_message_to_all(bot, f"✅ Sistema operante novamente! Boot Venon Online")
         except Exception as e:
             import traceback; tb_str = traceback.format_exc()
             logging.critical(f"O processo supervisor falhou! Erro: {e}\nTraceback:\n{tb_str}"); await asyncio.sleep(60)
@@ -392,5 +397,3 @@ if __name__ == '__main__':
     try: asyncio.run(supervisor())
     except KeyboardInterrupt: logging.info("Bot encerrado manualmente.")
     except Exception as e: logging.critical(f"Erro fatal no supervisor: {e}")
-
-
