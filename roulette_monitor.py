@@ -33,8 +33,8 @@ INTERVALO_VERIFICACAO_API = 5
 MAX_MARTINGALES = 2
 
 # --- CONFIGURAÇÕES DE ESTRATÉGIA ---
-GATILHO_ATRASO_DUZIA = 9
-NUMEROS_PARA_ANALISE = 80
+GATILHO_ATRASO_DUZIA = 8
+NUMEROS_PARA_ANALISE = 70
 GATILHO_CONFIANCA_IA_DUZIAS = 0.47
 GATILHO_CONFIANCA_IA_TOP5 = 0.28
 SEQUENCE_LENGTH_IA_DUZIAS = 15
@@ -397,6 +397,7 @@ if __name__ == '__main__':
     try: asyncio.run(supervisor())
     except KeyboardInterrupt: logging.info("Bot encerrado manualmente.")
     except Exception as e: logging.critical(f"Erro fatal no supervisor: {e}")
+
 
 
 
