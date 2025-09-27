@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 import pandas as pd
 import joblib
 import numpy as np
-from scipy.stats import entropy # Adicionamos a importação aqui também
+from scipy.stats import entropy
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
@@ -41,14 +41,17 @@ GATILHO_CONFIANCA_IA_TOP5 = 0.25
 SEQUENCE_LENGTH_IA_DUZIAS = 15
 SEQUENCE_LENGTH_IA_NUMEROS = 20
 
+# --- CONFIGURAÇÕES DE HUMANIZAÇÃO E HORA (BLOCO RE-ADICIONADO) ---
+FUSO_HORARIO_BRASIL = pytz.timezone('America/Sao_Paulo')
+WORK_MIN_MINUTES = 3 * 60; WORK_MAX_MINUTES = 5 * 60
+BREAK_MIN_MINUTES = 25; BREAK_MAX_MINUTES = 45
+HORA_TARDE = 12; HORA_NOITE = 18
+
 # --- MODELOS DE IA ---
 MODELO_IA_DUZIAS = None
 MODELO_IA_NUMEROS = None
-MODELO_IA_NUMEROS_FEATURES = None # Para guardar a lista de features
+MODELO_IA_NUMEROS_FEATURES = None
 
-# (O resto do seu código .py continua o mesmo até a função carregar_modelos_ia)
-# ...
-# O código completo está abaixo para evitar qualquer erro.
 # --- FUNÇÕES DE BANCO DE DADOS E PROPRIEDADES ---
 def get_db_connection():
     try:
@@ -118,7 +121,6 @@ def carregar_modelos_ia():
 def analisar_ia_duzias(numeros_recentes):
     if MODELO_IA_DUZIAS is None or len(numeros_recentes) < SEQUENCE_LENGTH_IA_DUZIAS: return None, 0
     try:
-        # Lógica para IA de dúzias (sem alterações)
         dados_sequencia = numeros_recentes[:SEQUENCE_LENGTH_IA_DUZIAS]
         features_dict = {}
         for i, numero in enumerate(dados_sequencia):
@@ -135,52 +137,42 @@ def analisar_ia_duzias(numeros_recentes):
 def analisar_ia_top5(numeros_recentes):
     if MODELO_IA_NUMEROS is None or len(numeros_recentes) < NUMEROS_PARA_ANALISE: return None, 0
     try:
-        # 1. Preparar features (exatamente como no treino v3)
         df = pd.DataFrame(numeros_recentes, columns=['numero'])
         df['duzia'] = df['numero'].apply(lambda x: get_properties(x)[1])
         df['cor_preto'] = df['numero'].apply(lambda x: 1 if get_properties(x)[0] == 'Preto' else 0)
         df['paridade_par'] = df['numero'].apply(lambda x: 1 if get_properties(x)[3] == 'Par' else 0)
         
-        # Criar uma única linha com as features para a previsão atual
         features_dict = {}
-        # Lag features
         for i in range(1, SEQUENCE_LENGTH_IA_NUMEROS + 1):
             features_dict[f'numero_lag_{i}'] = df['numero'].iloc[i-1]
             features_dict[f'duzia_lag_{i}'] = df['duzia'].iloc[i-1]
         
-        # Features agregadas
         window = df['numero'].head(NUMEROS_PARA_ANALISE)
         features_dict['feature_entropy'] = entropy(window.value_counts(normalize=True))
         features_dict['feature_unique_count'] = len(window.unique())
         
         df_features = pd.DataFrame([features_dict])
-        # Reordenar colunas para bater com o modelo
         df_features = df_features[MODELO_IA_NUMEROS_FEATURES]
 
-        # 2. Obter as probabilidades
         probabilidades = MODELO_IA_NUMEROS.predict_proba(df_features)[0]
         classes = MODELO_IA_NUMEROS.classes_
         prob_map = {classes[i]: probabilidades[i] for i in range(len(classes))}
-
-        # 3. Rankear e pegar os Top 5
         top_5_numeros = sorted(prob_map, key=prob_map.get, reverse=True)[:5]
         confianca_somada = sum(prob_map[num] for num in top_5_numeros)
-
         return top_5_numeros, confianca_somada
     except Exception as e:
         logging.error(f"Erro na análise com IA v3: {e}")
         return None, 0
 
-# --- LÓGICA DO BOT (sem alterações significativas, apenas nomes de estratégias no placar) ---
-# ...
-# O código restante é o mesmo da última versão. Abaixo está o arquivo completo.
-
 # --- LÓGICA DAS ESTRATÉGIAS ---
 DUZIAS = { 1: list(range(1, 13)), 2: list(range(13, 25)), 3: list(range(25, 37)) }
+
+# --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ultimo_numero_processado_api, numero_anterior_estrategia, daily_play_history, daily_messages_sent, active_strategy_state = None, None, [], {}, {}
 
 def reset_daily_messages_tracker(): global daily_messages_sent; daily_messages_sent = {"tarde": False, "noite": False}
+
 def initialize_score():
     score = {"last_check_date": datetime.now(FUSO_HORARIO_BRASIL).date()}
     all_strategies = ["Estratégia Atraso de Dúzias", "Estratégia IA Dúzias", "Estratégia IA Top 5 Números"]
