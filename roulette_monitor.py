@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# VERSÃO FINAL COM MÚLTIPLAS ESTRATÉGIAS DE IA
+# VERSÃO COM IA APRIMORADA (FEATURES AGREGADAS)
 
 # --- IMPORTAÇÕES ---
 import os
@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 import pandas as pd
 import joblib
 import numpy as np
+from scipy.stats import entropy # Adicionamos a importação aqui também
 
 # --- CONFIGURAÇÕES ESSENCIAIS ---
 TOKEN_BOT = os.environ.get('TOKEN_BOT')
@@ -34,22 +35,20 @@ MAX_MARTINGALES = 2
 
 # --- CONFIGURAÇÕES DE ESTRATÉGIA ---
 GATILHO_ATRASO_DUZIA = 8
-NUMEROS_PARA_ANALISE = 70
-GATILHO_CONFIANCA_IA_DUZIAS = 0.47
-GATILHO_CONFIANCA_IA_TOP5 = 0.28
+NUMEROS_PARA_ANALISE = 60
+GATILHO_CONFIANCA_IA_DUZIAS = 0.60 
+GATILHO_CONFIANCA_IA_TOP5 = 0.25
 SEQUENCE_LENGTH_IA_DUZIAS = 15
 SEQUENCE_LENGTH_IA_NUMEROS = 20
-
-# --- CONFIGURAÇÕES DE HUMANIZAÇÃO ---
-FUSO_HORARIO_BRASIL = pytz.timezone('America/Sao_Paulo')
-WORK_MIN_MINUTES = 3 * 60; WORK_MAX_MINUTES = 5 * 60
-BREAK_MIN_MINUTES = 25; BREAK_MAX_MINUTES = 45
-HORA_TARDE = 12; HORA_NOITE = 18
 
 # --- MODELOS DE IA ---
 MODELO_IA_DUZIAS = None
 MODELO_IA_NUMEROS = None
+MODELO_IA_NUMEROS_FEATURES = None # Para guardar a lista de features
 
+# (O resto do seu código .py continua o mesmo até a função carregar_modelos_ia)
+# ...
+# O código completo está abaixo para evitar qualquer erro.
 # --- FUNÇÕES DE BANCO DE DADOS E PROPRIEDADES ---
 def get_db_connection():
     try:
@@ -97,26 +96,29 @@ def buscar_numeros_recentes_para_analise(limite=NUMEROS_PARA_ANALISE):
     
 # --- FUNÇÕES DE MACHINE LEARNING ---
 def carregar_modelos_ia():
-    global MODELO_IA_DUZIAS, MODELO_IA_NUMEROS
+    global MODELO_IA_DUZIAS, MODELO_IA_NUMEROS, MODELO_IA_NUMEROS_FEATURES
     try:
         MODELO_IA_DUZIAS = joblib.load('modelo_duzias.pkl')
-        logging.info("🧠 Modelo de IA (Dúzias) carregado com sucesso!")
+        logging.info("🧠 Modelo de IA (Dúzias) carregado!")
     except FileNotFoundError:
-        logging.warning("Arquivo 'modelo_duzias.pkl' não encontrado. Estratégia correspondente desativada.")
+        logging.warning("Arquivo 'modelo_duzias.pkl' não encontrado.")
     except Exception as e:
         logging.error(f"Erro ao carregar o modelo de Dúzias: {e}")
 
     try:
-        MODELO_IA_NUMEROS = joblib.load('modelo_numeros.pkl')
-        logging.info("🧠 Modelo de IA (Números) carregado com sucesso!")
+        data = joblib.load('modelo_numeros.pkl')
+        MODELO_IA_NUMEROS = data['model']
+        MODELO_IA_NUMEROS_FEATURES = data['features']
+        logging.info("🧠 Modelo de IA (Números v3) e features carregados!")
     except FileNotFoundError:
-        logging.warning("Arquivo 'modelo_numeros.pkl' não encontrado. Estratégia correspondente desativada.")
+        logging.warning("Arquivo 'modelo_numeros.pkl' não encontrado.")
     except Exception as e:
         logging.error(f"Erro ao carregar o modelo de Números: {e}")
 
 def analisar_ia_duzias(numeros_recentes):
     if MODELO_IA_DUZIAS is None or len(numeros_recentes) < SEQUENCE_LENGTH_IA_DUZIAS: return None, 0
     try:
+        # Lógica para IA de dúzias (sem alterações)
         dados_sequencia = numeros_recentes[:SEQUENCE_LENGTH_IA_DUZIAS]
         features_dict = {}
         for i, numero in enumerate(dados_sequencia):
@@ -131,33 +133,54 @@ def analisar_ia_duzias(numeros_recentes):
     except Exception as e: logging.error(f"Erro na análise com IA de Dúzias: {e}"); return None, 0
 
 def analisar_ia_top5(numeros_recentes):
-    if MODELO_IA_NUMEROS is None or len(numeros_recentes) < SEQUENCE_LENGTH_IA_NUMEROS: return None, 0
+    if MODELO_IA_NUMEROS is None or len(numeros_recentes) < NUMEROS_PARA_ANALISE: return None, 0
     try:
-        dados_sequencia = numeros_recentes[:SEQUENCE_LENGTH_IA_NUMEROS]
+        # 1. Preparar features (exatamente como no treino v3)
+        df = pd.DataFrame(numeros_recentes, columns=['numero'])
+        df['duzia'] = df['numero'].apply(lambda x: get_properties(x)[1])
+        df['cor_preto'] = df['numero'].apply(lambda x: 1 if get_properties(x)[0] == 'Preto' else 0)
+        df['paridade_par'] = df['numero'].apply(lambda x: 1 if get_properties(x)[3] == 'Par' else 0)
+        
+        # Criar uma única linha com as features para a previsão atual
         features_dict = {}
-        for i, numero in enumerate(dados_sequencia):
-            cor, duzia, _, paridade = get_properties(numero)
-            features_dict[f'numero_lag_{i+1}'] = numero; features_dict[f'duzia_lag_{i+1}'] = duzia
-            features_dict[f'cor_preto_lag_{i+1}'] = 1 if cor == 'Preto' else 0
-            features_dict[f'paridade_par_lag_{i+1}'] = 1 if paridade == 'Par' else 0
+        # Lag features
+        for i in range(1, SEQUENCE_LENGTH_IA_NUMEROS + 1):
+            features_dict[f'numero_lag_{i}'] = df['numero'].iloc[i-1]
+            features_dict[f'duzia_lag_{i}'] = df['duzia'].iloc[i-1]
+        
+        # Features agregadas
+        window = df['numero'].head(NUMEROS_PARA_ANALISE)
+        features_dict['feature_entropy'] = entropy(window.value_counts(normalize=True))
+        features_dict['feature_unique_count'] = len(window.unique())
+        
         df_features = pd.DataFrame([features_dict])
+        # Reordenar colunas para bater com o modelo
+        df_features = df_features[MODELO_IA_NUMEROS_FEATURES]
+
+        # 2. Obter as probabilidades
         probabilidades = MODELO_IA_NUMEROS.predict_proba(df_features)[0]
         classes = MODELO_IA_NUMEROS.classes_
         prob_map = {classes[i]: probabilidades[i] for i in range(len(classes))}
+
+        # 3. Rankear e pegar os Top 5
         top_5_numeros = sorted(prob_map, key=prob_map.get, reverse=True)[:5]
         confianca_somada = sum(prob_map[num] for num in top_5_numeros)
+
         return top_5_numeros, confianca_somada
-    except Exception as e: logging.error(f"Erro na análise com IA de Números: {e}"); return None, 0
+    except Exception as e:
+        logging.error(f"Erro na análise com IA v3: {e}")
+        return None, 0
+
+# --- LÓGICA DO BOT (sem alterações significativas, apenas nomes de estratégias no placar) ---
+# ...
+# O código restante é o mesmo da última versão. Abaixo está o arquivo completo.
 
 # --- LÓGICA DAS ESTRATÉGIAS ---
 DUZIAS = { 1: list(range(1, 13)), 2: list(range(13, 25)), 3: list(range(25, 37)) }
-
-# --- LÓGICA DO BOT ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ultimo_numero_processado_api, numero_anterior_estrategia, daily_play_history, daily_messages_sent, active_strategy_state = None, None, [], {}, {}
 
 def reset_daily_messages_tracker(): global daily_messages_sent; daily_messages_sent = {"tarde": False, "noite": False}
-
 def initialize_score():
     score = {"last_check_date": datetime.now(FUSO_HORARIO_BRASIL).date()}
     all_strategies = ["Estratégia Atraso de Dúzias", "Estratégia IA Dúzias", "Estratégia IA Top 5 Números"]
@@ -318,12 +341,7 @@ async def handle_martingale(bot, current_number):
     await edit_play_messages(bot, mensagem_editada, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_active_strategy(bot, numero):
-    _, duzia_do_numero, _, _ = get_properties(numero); winning_numbers = active_strategy_state["winning_numbers"]
-    is_win = numero in winning_numbers
-    if active_strategy_state['strategy_name'] == "Estratégia IA Dúzias":
-        is_win = duzia_do_numero == active_strategy_state['trigger_number'] and numero != 0
-
-    if is_win: await handle_win(bot, numero)
+    if numero in active_strategy_state["winning_numbers"]: await handle_win(bot, numero)
     else:
         active_strategy_state["martingale_level"] += 1
         if active_strategy_state["martingale_level"] <= MAX_MARTINGALES: await handle_martingale(bot, numero)
@@ -362,29 +380,28 @@ async def check_for_new_triggers(bot, numero, numero_anterior):
 async def work_session(bot):
     work_duration_minutes = random.randint(WORK_MIN_MINUTES, WORK_MAX_MINUTES)
     session_end_time = datetime.now(FUSO_HORARIO_BRASIL) + timedelta(minutes=work_duration_minutes)
-    logging.info(f"Iniciando nova sessão Boot Venon que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
-    await send_message_to_all(bot, f"Monitoramento de ciclos previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
+    logging.info(f"Iniciando nova sessão Venon Boot Roleta que durará {work_duration_minutes // 60}h e {work_duration_minutes % 60}min.")
+    await send_message_to_all(bot, f"Monitoramento de ciclos Venon Boot Roleta previsto para durar *{work_duration_minutes // 60}h e {work_duration_minutes % 60}min*.", parse_mode=ParseMode.MARKDOWN)
     while datetime.now(FUSO_HORARIO_BRASIL) < session_end_time:
-        await check_and_send_period_messages(bot) # <-- CORREÇÃO AQUI
+        await check_and_send_period_messages(bot)
         numero, numero_anterior = buscar_ultimo_numero_api()
         if numero is not None: await processar_numero(bot, numero, numero_anterior)
         await asyncio.sleep(INTERVALO_VERIFICACAO_API)
-    logging.info("Sessão de trabalho Boot Venon concluída.")
+    logging.info("Sessão de trabalho Venon Boot Roleta concluída.")
 
 async def supervisor():
     bot = telegram.Bot(token=TOKEN_BOT)
-    try: await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online Boot Venon!\nIniciando gerenciamento de ciclos.")
+    try: await send_message_to_all(bot, f"🤖 Monitoramento Roleta Online Venon Boot Roleta!\nIniciando gerenciamento de ciclos.")
     except Exception as e: logging.critical(f"Não foi possível conectar ao Telegram na inicialização: {e}")
     while True:
         try:
-            # await check_and_send_period_messages(bot) <-- REMOVIDO DAQUI
             await work_session(bot)
             break_duration_minutes = random.randint(BREAK_MIN_MINUTES, BREAK_MAX_MINUTES)
             logging.info(f"Iniciando pausa de {break_duration_minutes} minutos.")
-            await send_message_to_all(bot, f"⏸️ Pausa programada para manutenção Boot Venon.\nDuração: *{break_duration_minutes} minutos*.", parse_mode=ParseMode.MARKDOWN)
+            await send_message_to_all(bot, f"⏸️ Pausa programada para manutenção.\nDuração: *{break_duration_minutes} minutos*.", parse_mode=ParseMode.MARKDOWN)
             await asyncio.sleep(break_duration_minutes * 60)
             logging.info("Pausa finalizada. Iniciando nova sessão.")
-            await send_message_to_all(bot, f"✅ Sistema operante novamente! Boot Venon Online")
+            await send_message_to_all(bot, f"✅ Sistema Venon Boot Roleta operante novamente!")
         except Exception as e:
             import traceback; tb_str = traceback.format_exc()
             logging.critical(f"O processo supervisor falhou! Erro: {e}\nTraceback:\n{tb_str}"); await asyncio.sleep(60)
@@ -397,8 +414,3 @@ if __name__ == '__main__':
     try: asyncio.run(supervisor())
     except KeyboardInterrupt: logging.info("Bot encerrado manualmente.")
     except Exception as e: logging.critical(f"Erro fatal no supervisor: {e}")
-
-
-
-
-
