@@ -9,7 +9,7 @@ import psycopg2
 from urllib.parse import urlparse
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
-SEQUENCE_LENGTH = 15
+SEQUENCE_LENGTH = 10
 
 def get_db_connection():
     try:
